@@ -28,6 +28,8 @@ java -cp target/classes io.github.ogulcanogul1.miniredis.Main
 
 Expected output: `mini-redis 0.1.0-SNAPSHOT`
 
+The `java` command must be the same JDK 21 that Maven uses. Check with `java -version` before running; a different `java` on the `PATH` can run the class too, but it is not the supported setup.
+
 ## Test
 
 ```bash
