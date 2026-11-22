@@ -5,7 +5,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.Properties;
 
-
+/** Entry point. Composition root: later phases wire the server here. */
 public final class Main {
 
     private Main() {}
