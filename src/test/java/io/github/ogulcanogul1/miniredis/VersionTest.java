@@ -1,9 +1,8 @@
 package io.github.ogulcanogul1.miniredis;
 
-import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.junit.jupiter.api.Test;
 
 class VersionTest {
 
@@ -18,5 +17,3 @@ class VersionTest {
         assertThat(Main.version()).isNotBlank().doesNotContain("${");
     }
 }
-
-
