@@ -4,3 +4,4 @@ target/
 *.log
 *.hprof
 *.jfr
+docs/adr/
