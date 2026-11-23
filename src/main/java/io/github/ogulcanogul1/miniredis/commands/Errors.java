@@ -14,8 +14,6 @@ final class Errors {
 
     private Errors() {}
 
-    /* {@code ERR wrong number of arguments for 'get' command}. {@code name} is the table name. */
-
     /** {@code ERR wrong number of arguments for 'get' command}. {@code name} is the table name. */
     static Reply wrongArity(String name) {
         return Reply.error("ERR wrong number of arguments for '" + name + "' command");
