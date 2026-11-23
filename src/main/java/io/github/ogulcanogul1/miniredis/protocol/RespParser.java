@@ -87,6 +87,11 @@ public final class RespParser {
         end += len;
     }
 
+    /** Returns the number of buffered, not-yet-consumed bytes. */
+    public int bufferedBytes() {
+        return end - start;
+    }
+
     /** Returns the next complete request, {@link ParseResult#NEED_MORE}, or a protocol error. */
     public ParseResult next() {
         while (true) {
