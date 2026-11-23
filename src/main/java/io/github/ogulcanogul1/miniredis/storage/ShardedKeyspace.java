@@ -806,6 +806,86 @@ final class ShardedKeyspace implements Keyspace {
     }
 
     @Override
+    public long usedMemoryBytes() {
+        long total = 0L;
+        for (Shard s : shards) {
+            s.readLock.lock();
+            try {
+                for (Dict.Entry<Bytes, RedisObject> e : s.dict) {
+                    total += MemoryEstimator.estimateEntry(e.key(), e.value());
+                }
+            } finally {
+                s.readLock.unlock();
+            }
+        }
+        return total;
+    }
+
+    @Override
+    public int evictIfNeeded(long maxMemoryBytes, EvictionPolicy policy, int sampleSize) {
+        Objects.requireNonNull(policy, "policy");
+        if (sampleSize < 1) {
+            throw new IllegalArgumentException("sampleSize must be positive, got " + sampleSize);
+        }
+        if (maxMemoryBytes <= 0 || policy == EvictionPolicy.NOEVICTION) {
+            return 0;
+        }
+        boolean volatileOnly = policy == EvictionPolicy.VOLATILE_LRU || policy == EvictionPolicy.VOLATILE_RANDOM;
+        boolean lru = policy == EvictionPolicy.ALLKEYS_LRU || policy == EvictionPolicy.VOLATILE_LRU;
+        long used = usedMemoryBytes();
+        int evicted = 0;
+        while (used > maxMemoryBytes) {
+            boolean progress = false;
+            for (Shard s : shards) {
+                if (used <= maxMemoryBytes) {
+                    break;
+                }
+                s.writeLock.lock();
+                try {
+                    List<Bytes> sample =
+                            (volatileOnly ? s.expires : s.dict).sampleKeys(sampleSize, ThreadLocalRandom.current());
+                    if (sample.isEmpty()) {
+                        continue;
+                    }
+                    Bytes victim = pickVictim(s.dict, sample, lru);
+                    if (victim == null) {
+                        continue;
+                    }
+                    RedisObject removed = s.dict.remove(victim);
+                    s.expires.remove(victim);
+                    if (removed != null) {
+                        used -= MemoryEstimator.estimateEntry(victim, removed);
+                        evicted++;
+                        progress = true;
+                    }
+                } finally {
+                    s.writeLock.unlock();
+                }
+            }
+            if (!progress) {
+                break;
+            }
+        }
+        return evicted;
+    }
+
+    private static Bytes pickVictim(Dict<Bytes, RedisObject> dict, List<Bytes> sample, boolean lru) {
+        if (!lru) {
+            return sample.getFirst();
+        }
+        Bytes best = null;
+        long oldestLru = Long.MAX_VALUE;
+        for (Bytes key : sample) {
+            RedisObject obj = dict.get(key);
+            if (obj != null && (best == null || obj.lru() < oldestLru)) {
+                oldestLru = obj.lru();
+                best = key;
+            }
+        }
+        return best;
+    }
+
+    @Override
     public void flush() {
         int[] all = new int[shards.length];
         for (int i = 0; i < shards.length; i++) {

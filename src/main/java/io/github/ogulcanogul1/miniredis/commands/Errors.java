@@ -19,6 +19,7 @@ final class Errors {
     static final Reply WRONGTYPE = Reply.error("WRONGTYPE Operation against a key holding the wrong kind of value");
     static final Reply NOT_FLOAT = Reply.error("ERR value is not a valid float");
     static final Reply MIN_MAX_NOT_FLOAT = Reply.error("ERR min or max is not a float");
+    static final Reply OOM = Reply.error("OOM command not allowed when used memory > 'maxmemory'.");
 
     /** Redis shows at most this many bytes of the command name, and of all arguments together. */
     static final int MAX_SHOWN_BYTES = 128;

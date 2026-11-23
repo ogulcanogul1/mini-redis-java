@@ -2,6 +2,7 @@ package io.github.ogulcanogul1.miniredis.server;
 
 import io.github.ogulcanogul1.miniredis.persistence.AofFsyncPolicy;
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
+import io.github.ogulcanogul1.miniredis.storage.EvictionPolicy;
 import io.github.ogulcanogul1.miniredis.storage.LockType;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -95,6 +96,8 @@ public final class ConfigParser {
         private boolean appendOnly;
         private String appendFilename;
         private AofFsyncPolicy appendFsync;
+        private long maxMemoryBytes;
+        private EvictionPolicy maxMemoryPolicy;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -113,6 +116,8 @@ public final class ConfigParser {
             this.appendOnly = base.appendOnly();
             this.appendFilename = base.appendFilename();
             this.appendFsync = base.appendFsync();
+            this.maxMemoryBytes = base.maxMemoryBytes();
+            this.maxMemoryPolicy = base.maxMemoryPolicy();
         }
 
         void apply(String rawKey, String value) {
@@ -183,6 +188,16 @@ public final class ConfigParser {
                         case "no" -> AofFsyncPolicy.NO;
                         default -> throw new ConfigException("invalid appendfsync: " + value);
                     };
+                case "maxmemory" -> this.maxMemoryBytes = parseLong(key, value);
+                case "maxmemory-policy" ->
+                    this.maxMemoryPolicy = switch (value.toLowerCase(Locale.ROOT)) {
+                        case "noeviction" -> EvictionPolicy.NOEVICTION;
+                        case "allkeys-lru" -> EvictionPolicy.ALLKEYS_LRU;
+                        case "volatile-lru" -> EvictionPolicy.VOLATILE_LRU;
+                        case "allkeys-random" -> EvictionPolicy.ALLKEYS_RANDOM;
+                        case "volatile-random" -> EvictionPolicy.VOLATILE_RANDOM;
+                        default -> throw new ConfigException("invalid maxmemory-policy: " + value);
+                    };
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
@@ -204,7 +219,9 @@ public final class ConfigParser {
                     idleTimeoutSeconds,
                     appendOnly,
                     appendFilename,
-                    appendFsync);
+                    appendFsync,
+                    maxMemoryBytes,
+                    maxMemoryPolicy);
         }
 
         private static int parseInt(String key, String value) {
