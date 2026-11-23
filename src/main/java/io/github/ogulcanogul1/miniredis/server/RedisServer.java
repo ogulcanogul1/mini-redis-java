@@ -11,6 +11,8 @@ import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPerConnServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
 import io.github.ogulcanogul1.miniredis.net.VirtualThreadServer;
+import io.github.ogulcanogul1.miniredis.persistence.AofAppender;
+import io.github.ogulcanogul1.miniredis.persistence.AofLoader;
 import io.github.ogulcanogul1.miniredis.storage.ActiveExpirer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
@@ -18,6 +20,7 @@ import io.github.ogulcanogul1.miniredis.util.Clock;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Properties;
@@ -36,6 +39,7 @@ public final class RedisServer implements AutoCloseable {
     private final ServerConfig config;
     private final ServerStats stats;
     private final ActiveExpirer activeExpirer;
+    private final AofAppender aofAppender;
     private final ServerBackend backend;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -51,7 +55,24 @@ public final class RedisServer implements AutoCloseable {
         Clock clock = Clock.system();
         Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType(), clock);
         this.activeExpirer = new ActiveExpirer(keyspace);
-        Dispatcher dispatcher = new Dispatcher(table, new CommandContext(keyspace, stats));
+        CommandContext ctx = new CommandContext(keyspace, stats);
+        Dispatcher dispatcher;
+        if (config.appendOnly()) {
+            Path aofPath = Path.of(config.appendFilename());
+            try {
+                int replayed = AofLoader.load(aofPath, config.respLimits(), table, ctx);
+                if (replayed > 0) {
+                    log.info("DB loaded from append only file: {} commands replayed", replayed);
+                }
+                this.aofAppender = AofAppender.open(aofPath, config.appendFsync(), clock);
+            } catch (IOException e) {
+                throw new UncheckedIOException("failed to initialize AOF at " + aofPath, e);
+            }
+            dispatcher = new Dispatcher(table, ctx, aofAppender);
+        } else {
+            this.aofAppender = null;
+            dispatcher = new Dispatcher(table, ctx);
+        }
         this.backend = switch (config.ioModel()) {
             case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);
             case THREAD_PER_CONN ->
@@ -111,6 +132,9 @@ public final class RedisServer implements AutoCloseable {
         applyLogLevel(config.logLevel());
         backend.start();
         activeExpirer.start();
+        if (aofAppender != null) {
+            aofAppender.start();
+        }
         started.set(true);
         log.info(
                 "mini-redis {} listening on {}:{} (io-model={}, shards={}, lock-type={})",
@@ -127,10 +151,17 @@ public final class RedisServer implements AutoCloseable {
         backend.awaitTermination();
     }
 
-    /** Stops the network backend and active expirer cleanly. Idempotent. */
+    /** Stops the network backend, active expirer, and AOF appender cleanly. Idempotent. */
     public void stop() {
         activeExpirer.close();
         backend.stop();
+        if (aofAppender != null) {
+            try {
+                aofAppender.close();
+            } catch (IOException e) {
+                log.error("failed to close AOF cleanly", e);
+            }
+        }
         if (started.get() && stopped.compareAndSet(false, true)) {
             log.info("mini-redis stopped");
         }

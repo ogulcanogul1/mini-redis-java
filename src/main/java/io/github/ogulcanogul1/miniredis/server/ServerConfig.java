@@ -1,5 +1,6 @@
 package io.github.ogulcanogul1.miniredis.server;
 
+import io.github.ogulcanogul1.miniredis.persistence.AofFsyncPolicy;
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import io.github.ogulcanogul1.miniredis.storage.LockType;
@@ -35,7 +36,10 @@ public record ServerConfig(
         int ioThreads,
         int maxClients,
         long clientOutputBufferLimit,
-        long idleTimeoutSeconds) {
+        long idleTimeoutSeconds,
+        boolean appendOnly,
+        String appendFilename,
+        AofFsyncPolicy appendFsync) {
 
     /** Localhost only: safe default. */
     public static final String DEFAULT_BIND = "127.0.0.1";
@@ -51,6 +55,9 @@ public record ServerConfig(
     public static final int DEFAULT_MAX_CLIENTS = 10_000;
     public static final long DEFAULT_CLIENT_OUTPUT_BUFFER_LIMIT = 16L * 1024 * 1024;
     public static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 0L;
+    public static final boolean DEFAULT_APPEND_ONLY = false;
+    public static final String DEFAULT_APPEND_FILENAME = "appendonly.aof";
+    public static final AofFsyncPolicy DEFAULT_APPEND_FSYNC = AofFsyncPolicy.EVERYSEC;
 
     /** Supported I/O backend models (K2). */
     public enum IoModel {
@@ -101,6 +108,10 @@ public record ServerConfig(
         if (idleTimeoutSeconds < 0) {
             throw new ConfigException("idle-timeout-seconds must be >= 0, got " + idleTimeoutSeconds);
         }
+        if (appendFilename == null || appendFilename.isBlank()) {
+            throw new ConfigException("appendfilename must not be blank");
+        }
+        Objects.requireNonNull(appendFsync, "appendFsync");
     }
 
     /** Backward-compatible 5-argument constructor using default pool, sharding, and reactor settings. */
@@ -144,6 +155,40 @@ public record ServerConfig(
                 DEFAULT_IDLE_TIMEOUT_SECONDS);
     }
 
+    /** Backward-compatible 13-argument constructor using default AOF settings ({@code appendonly=false}). */
+    public ServerConfig(
+            String bind,
+            int port,
+            IoModel ioModel,
+            LogLevel logLevel,
+            RespLimits respLimits,
+            int workerThreads,
+            int queueCapacity,
+            int shards,
+            LockType lockType,
+            int ioThreads,
+            int maxClients,
+            long clientOutputBufferLimit,
+            long idleTimeoutSeconds) {
+        this(
+                bind,
+                port,
+                ioModel,
+                logLevel,
+                respLimits,
+                workerThreads,
+                queueCapacity,
+                shards,
+                lockType,
+                ioThreads,
+                maxClients,
+                clientOutputBufferLimit,
+                idleTimeoutSeconds,
+                DEFAULT_APPEND_ONLY,
+                DEFAULT_APPEND_FILENAME,
+                DEFAULT_APPEND_FSYNC);
+    }
+
     /** Returns the default configuration ({@code 127.0.0.1:6380}, {@code multi-reactor}, {@code 4} I/O threads, {@code 16} rwlock shards). */
     public static ServerConfig defaults() {
         return onPort(DEFAULT_PORT);
@@ -164,6 +209,9 @@ public record ServerConfig(
                 DEFAULT_IO_THREADS,
                 DEFAULT_MAX_CLIENTS,
                 DEFAULT_CLIENT_OUTPUT_BUFFER_LIMIT,
-                DEFAULT_IDLE_TIMEOUT_SECONDS);
+                DEFAULT_IDLE_TIMEOUT_SECONDS,
+                DEFAULT_APPEND_ONLY,
+                DEFAULT_APPEND_FILENAME,
+                DEFAULT_APPEND_FSYNC);
     }
 }
