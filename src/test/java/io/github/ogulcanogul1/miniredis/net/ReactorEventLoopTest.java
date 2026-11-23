@@ -135,7 +135,10 @@ class ReactorEventLoopTest {
                 assertThat(new String(idleClient.readFrame(), StandardCharsets.US_ASCII))
                         .isEqualTo("+PONG\r\n");
 
-                // Advance fake monotonic clock beyond idle timeout (50 ms) and wait for sweep.
+                // Advance fake monotonic clock beyond idle timeout (50 ms) after flushOutbound updates lastActiveNanos.
+                Thread.sleep(30);
+                nanoTime.addAndGet(TimeUnit.MILLISECONDS.toNanos(100));
+                Thread.sleep(30);
                 nanoTime.addAndGet(TimeUnit.MILLISECONDS.toNanos(100));
                 assertThat(idleClient.readNextByte()).isEqualTo(-1);
             }
