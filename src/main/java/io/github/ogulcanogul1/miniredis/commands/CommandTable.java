@@ -71,7 +71,12 @@ public final class CommandTable {
                 new CommandSpec("sadd", -3, Set.of(Flag.WRITE), SetCommands::sadd),
                 new CommandSpec("srem", -3, Set.of(Flag.WRITE), SetCommands::srem),
                 new CommandSpec("sismember", 3, Set.of(Flag.READONLY), SetCommands::sismember),
-                new CommandSpec("smembers", 2, Set.of(Flag.READONLY), SetCommands::smembers)));
+                new CommandSpec("smembers", 2, Set.of(Flag.READONLY), SetCommands::smembers),
+                new CommandSpec("zadd", -4, Set.of(Flag.WRITE), ZSetCommands::zadd),
+                new CommandSpec("zscore", 3, Set.of(Flag.READONLY), ZSetCommands::zscore),
+                new CommandSpec("zrange", -4, Set.of(Flag.READONLY), ZSetCommands::zrange),
+                new CommandSpec("zrangebyscore", -4, Set.of(Flag.READONLY), ZSetCommands::zrangeByScore),
+                new CommandSpec("zrank", 3, Set.of(Flag.READONLY), ZSetCommands::zrank)));
     }
 
     /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */
