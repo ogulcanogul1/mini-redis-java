@@ -3,12 +3,16 @@ package io.github.ogulcanogul1.miniredis.commands;
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Consumer;
 
 /**
- * Per-connection authentication, protected-mode, and transaction ({@code MULTI}/{@code EXEC}/
- * {@code WATCH}) state. Owned by a single connection/session thread.
+ * Per-connection authentication, protected-mode, transaction ({@code MULTI}/{@code EXEC}/
+ * {@code WATCH}), and Pub/Sub subscription state.
  */
 public final class SessionAuthState {
 
@@ -16,15 +20,22 @@ public final class SessionAuthState {
 
     private boolean authenticated;
     private final boolean protectedModeBlocked;
+    private final Consumer<Reply> asyncReplySink;
 
     private boolean inMulti;
     private boolean txDirty;
     private final List<List<Bytes>> txQueue = new ArrayList<>();
     private final Map<Bytes, Long> watchedKeys = new LinkedHashMap<>();
+    private final Set<Bytes> subscriptions = new LinkedHashSet<>();
 
     public SessionAuthState(boolean authenticated, boolean protectedModeBlocked) {
+        this(authenticated, protectedModeBlocked, reply -> {});
+    }
+
+    public SessionAuthState(boolean authenticated, boolean protectedModeBlocked, Consumer<Reply> asyncReplySink) {
         this.authenticated = authenticated;
         this.protectedModeBlocked = protectedModeBlocked;
+        this.asyncReplySink = Objects.requireNonNull(asyncReplySink, "asyncReplySink");
     }
 
     /** Returns an unrestricted state for in-process unit tests without network auth. */
@@ -42,6 +53,28 @@ public final class SessionAuthState {
 
     public boolean isProtectedModeBlocked() {
         return protectedModeBlocked;
+    }
+
+    void pushAsync(Reply reply) {
+        asyncReplySink.accept(reply);
+    }
+
+    synchronized void addSubscription(Bytes channel) {
+        subscriptions.add(channel);
+    }
+
+    synchronized void removeSubscription(Bytes channel) {
+        subscriptions.remove(channel);
+    }
+
+    synchronized int subscriptionCount() {
+        return subscriptions.size();
+    }
+
+    synchronized List<Bytes> drainSubscriptions() {
+        List<Bytes> copy = List.copyOf(subscriptions);
+        subscriptions.clear();
+        return copy;
     }
 
     boolean isInMulti() {

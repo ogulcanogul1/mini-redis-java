@@ -33,13 +33,24 @@ final class ClientSessionLoop {
         String remote = String.valueOf(client.getRemoteSocketAddress());
         stats.clientConnected();
         log.debug("client={} addr={} connected", clientId, remote);
+        RespSession session = null;
         try {
             client.setTcpNoDelay(true);
             InputStream in = client.getInputStream();
             BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream());
+            Object writeLock = new Object();
             byte[] readBuf = new byte[READ_BUFFER_SIZE];
             boolean loopback = isLoopback(client.getRemoteSocketAddress());
-            RespSession session = new RespSession(dispatcher, limits, loopback);
+            session = new RespSession(dispatcher, limits, loopback, bytes -> {
+                synchronized (writeLock) {
+                    try {
+                        out.write(bytes);
+                        out.flush();
+                    } catch (IOException ignored) {
+                        // Connection closed concurrently; cleanup happens in serve loop.
+                    }
+                }
+            });
 
             while (isRunning.getAsBoolean() && !session.shouldClose()) {
                 int n = in.read(readBuf);
@@ -48,8 +59,10 @@ final class ClientSessionLoop {
                 }
                 byte[] reply = session.onData(readBuf, 0, n);
                 if (reply.length > 0) {
-                    out.write(reply);
-                    out.flush();
+                    synchronized (writeLock) {
+                        out.write(reply);
+                        out.flush();
+                    }
                 }
             }
         } catch (IOException e) {
@@ -57,6 +70,9 @@ final class ClientSessionLoop {
                 log.debug("client={} addr={} connection error: {}", clientId, remote, e.getMessage());
             }
         } finally {
+            if (session != null) {
+                session.close();
+            }
             closeQuietly(client);
             stats.clientDisconnected();
             log.debug("client={} addr={} closed", clientId, remote);

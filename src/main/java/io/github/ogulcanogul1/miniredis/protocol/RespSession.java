@@ -6,6 +6,7 @@ import io.github.ogulcanogul1.miniredis.commands.Reply;
 import io.github.ogulcanogul1.miniredis.commands.SessionAuthState;
 import java.io.ByteArrayOutputStream;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * One client's conversation, without the socket: bytes in, reply bytes out. Faz 3 connects it to a
@@ -28,9 +29,19 @@ public final class RespSession {
     }
 
     public RespSession(Dispatcher dispatcher, RespLimits limits, boolean loopback) {
+        this(dispatcher, limits, loopback, bytes -> {});
+    }
+
+    public RespSession(Dispatcher dispatcher, RespLimits limits, boolean loopback, Consumer<byte[]> asyncBytesSink) {
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
         this.parser = new RespParser(Objects.requireNonNull(limits, "limits"));
-        this.authState = dispatcher.newSessionState(loopback);
+        Objects.requireNonNull(asyncBytesSink, "asyncBytesSink");
+        this.authState = dispatcher.newSessionState(loopback, reply -> asyncBytesSink.accept(RespWriter.encode(reply)));
+    }
+
+    /** Releases session-scoped state (such as Pub/Sub subscriptions) when the connection closes. */
+    public void close() {
+        dispatcher.closeSession(authState);
     }
 
     /**
