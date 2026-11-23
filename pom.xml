@@ -17,8 +17,11 @@
         <junit.version>5.14.4</junit.version>
         <assertj.version>3.27.7</assertj.version>
         <archunit.version>1.5.1</archunit.version>
-        <jacoco.version>0.8.16</jacoco.version>
+        <slf4j.version>2.0.20</slf4j.version>
+        <logback.version>1.6.8</logback.version>
+        <failsafe.version>3.6.1</failsafe.version>
         <palantir-java-format.version>2.103.0</palantir-java-format.version>
+        <jacoco.version>0.8.16</jacoco.version>
     </properties>
 
     <dependencyManagement>
@@ -45,11 +48,23 @@
             <version>${assertj.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Faz 1 Adım 1.0 -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
             <version>${archunit.version}</version>
             <scope>test</scope>
+        </dependency>
+        <!-- Faz 3 Adım 3.0 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
         </dependency>
     </dependencies>
 
@@ -82,6 +97,16 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.6.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${failsafe.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>3.11.0</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -165,22 +190,18 @@
                 </configuration>
             </plugin>
             <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
-                    <!-- Windows'ta git yokken Spotless CRLF bekler. Repo LF kullanır (.gitattributes). -->
-                    <lineEndings>UNIX</lineEndings>
-                    <java>
-                        <palantirJavaFormat>
-                            <version>${palantir-java-format.version}</version>
-                        </palantirJavaFormat>
-                        <removeUnusedImports/>
-                    </java>
+                    <excludes>
+                        <exclude>**/*CompatIT.java</exclude>
+                    </excludes>
                 </configuration>
                 <executions>
                     <execution>
                         <goals>
-                            <goal>check</goal>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -205,6 +226,48 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration>
+                    <!-- Windows'ta git yokken Spotless CRLF bekler. Repo LF kullanır (.gitattributes). -->
+                    <lineEndings>UNIX</lineEndings>
+                    <java>
+                        <palantirJavaFormat>
+                            <version>${palantir-java-format.version}</version>
+                        </palantirJavaFormat>
+                        <removeUnusedImports/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>compat</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.self="override"/>
+                            <systemPropertyVariables>
+                                <redis.ref.host>127.0.0.1</redis.ref.host>
+                                <redis.ref.port>6390</redis.ref.port>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

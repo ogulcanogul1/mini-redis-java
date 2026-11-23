@@ -88,6 +88,16 @@ class ArchitectureTest {
             .callMethodWhere(target(name("printStackTrace")))
             .allowEmptyShould(true);
 
+    // K12: library and layer code uses only the SLF4J API; only server configures Logback.
+    @ArchTest
+    static final ArchRule onlyServerMayAccessLogback = noClasses()
+            .that()
+            .resideOutsideOfPackage(ROOT + ".server..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("ch.qos.logback..")
+            .allowEmptyShould(true);
+
     private static ArchRule independent(String pkg) {
         return noClasses()
                 .that()
