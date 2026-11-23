@@ -172,6 +172,73 @@ class RespParserTest {
         assertThat(parser.capacity()).isLessThanOrEqualTo(RespParser.MAX_IDLE_CAPACITY);
     }
 
+    @Test
+    void parsesInlineCommandsAndIgnoresBlankLines() {
+        RespParser parser = new RespParser();
+        feed(parser, "\r\n   \t \nPING\r\nPING\n  SET\tk  v \r\n");
+
+        assertThat(parser.next()).isEqualTo(cmd("PING"));
+        assertThat(parser.next()).isEqualTo(cmd("PING"));
+        assertThat(parser.next()).isEqualTo(cmd("SET", "k", "v"));
+        assertThat(parser.next()).isEqualTo(ParseResult.NEED_MORE);
+    }
+
+    @Test
+    void inlineTreatsCrInsideLineAndVerticalTabLikeRedis() {
+        RespParser parser = new RespParser();
+        feed(parser, "PING\rPING\r\nECHO a\u000bb\r\n");
+
+        assertThat(parser.next()).isEqualTo(cmd("PING", "PING"));
+        assertThat(parser.next()).isEqualTo(cmd("ECHO", "a\u000bb"));
+    }
+
+    @Test
+    void inlineHandlesDoubleAndSingleQuotesAndEscapes() {
+        RespParser parser = new RespParser();
+        feed(parser, "ECHO \"a\\nb\\rc\\td\\be\\af\\q\"\n");
+        assertThat(parser.next()).isEqualTo(cmd("ECHO", "a\nb\rc\td\be\u0007fq"));
+
+        feed(parser, "ECHO \"\\x41\\x4a\\xff\\x00\\x4\\xZZ\"\n");
+        assertThat(parser.next()).isEqualTo(new ParseResult.Command(List.of(Bytes.utf8("ECHO"), Bytes.of(new byte[] {
+            'A', 'J', (byte) 0xFF, 0, 'x', '4', 'x', 'Z', 'Z'
+        }))));
+
+        feed(parser, "ECHO 'a\\nb' 'it\\'s' a\"b\" \"ok\"\u000b\n");
+        assertThat(parser.next()).isEqualTo(cmd("ECHO", "a\\nb", "it's", "ab", "ok"));
+    }
+
+    @Test
+    void inlineRejectsUnbalancedQuotesAndTooBigLine() {
+        assertError("\"abc\n", ProtocolErrors.UNBALANCED_QUOTES);
+        assertError("'abc\n", ProtocolErrors.UNBALANCED_QUOTES);
+        assertError("\"ab\"c\n", ProtocolErrors.UNBALANCED_QUOTES);
+        assertError("'ab'c\n", ProtocolErrors.UNBALANCED_QUOTES);
+        assertError("\"\\\n", ProtocolErrors.UNBALANCED_QUOTES);
+
+        RespParser small = new RespParser(new RespLimits(10, 10, 8));
+        assertError(small, "123456789", ProtocolErrors.TOO_BIG_INLINE);
+    }
+
+    @Test
+    void inlineAndMultibulkCanMixInSameStreamAndAnyChunkSize() {
+        byte[] wire = ascii("PING\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n$5\r\n");
+        for (int chunk = 1; chunk <= wire.length; chunk++) {
+            RespParser parser = new RespParser();
+            List<ParseResult> results = new ArrayList<>();
+            for (int off = 0; off < wire.length; off += chunk) {
+                parser.feed(wire, off, Math.min(chunk, wire.length - off));
+                while (true) {
+                    ParseResult r = parser.next();
+                    if (r == ParseResult.NEED_MORE) {
+                        break;
+                    }
+                    results.add(r);
+                }
+            }
+            assertThat(results).containsExactly(cmd("PING"), cmd("GET", "k"), cmd("$5"));
+        }
+    }
+
     private static void assertError(String input, String expectedMessage) {
         assertError(new RespParser(), input, expectedMessage);
     }
