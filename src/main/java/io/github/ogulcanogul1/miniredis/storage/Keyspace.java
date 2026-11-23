@@ -198,4 +198,12 @@ public interface Keyspace {
 
     /** Restores entries from a snapshot, skipping already-expired entries. */
     void restoreSnapshot(List<SnapshotEntry> entries);
+
+    /**
+     * Returns a monotonically increasing version token for {@code key} used by optimistic locking
+     * ({@code WATCH}/{@code EXEC}).
+     */
+    default long keyVersion(Bytes key) {
+        return 0L;
+    }
 }

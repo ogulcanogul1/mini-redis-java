@@ -4,22 +4,26 @@ import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.storage.EvictionPolicy;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Finds the command for an argv, enforces connection authentication / protected mode, checks
- * arity, and runs the handler. Unexpected {@link RuntimeException}s are caught here, logged at
- * ERROR (without user data), and translated to a generic error reply (K12).
+ * Finds the command for an argv, enforces connection authentication / protected mode, handles
+ * {@code MULTI}/{@code EXEC}/{@code DISCARD}/{@code WATCH}/{@code UNWATCH}, checks arity, and runs
+ * the handler. Unexpected {@link RuntimeException}s are caught here, logged at ERROR (without user
+ * data), and translated to a generic error reply (K12).
  */
 public final class Dispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(Dispatcher.class);
     private static final int DEFAULT_EVICTION_SAMPLES = 5;
 
+    private static final Reply QUEUED = new Reply.SimpleString("QUEUED");
     private static final Reply NOAUTH_ERROR = new Reply.ErrorReply("NOAUTH Authentication required.");
     private static final Reply WRONGPASS_ERROR =
             new Reply.ErrorReply("WRONGPASS invalid username-password pair or user is disabled.");
@@ -27,6 +31,8 @@ public final class Dispatcher {
             new Reply.ErrorReply("ERR Client sent AUTH, but no password is set");
     private static final Reply PROTECTED_MODE_ERROR = new Reply.ErrorReply(
             "DENIED Redis is running in protected mode because protected mode is enabled and no password is set for the default user. In this mode connections are only accepted from the loopback interface.");
+    private static final Reply EXEC_ABORT_ERROR =
+            new Reply.ErrorReply("EXECABORT Transaction discarded because of previous errors.");
 
     private final CommandTable table;
     private final CommandContext ctx;
@@ -104,6 +110,9 @@ public final class Dispatcher {
             if (!authState.isAuthenticated()) {
                 return recordError(NOAUTH_ERROR);
             }
+            if (authState.isInMulti()) {
+                authState.markTxDirty();
+            }
             return recordError(Errors.unknownCommand(argv));
         }
         CommandSpec spec = found.get();
@@ -128,10 +137,100 @@ public final class Dispatcher {
         if (!authState.isAuthenticated() && !"quit".equals(cmdName)) {
             return recordError(NOAUTH_ERROR);
         }
+
+        if ("multi".equals(cmdName)
+                || "exec".equals(cmdName)
+                || "discard".equals(cmdName)
+                || "watch".equals(cmdName)
+                || "unwatch".equals(cmdName)) {
+            if (!spec.acceptsArgCount(argv.size())) {
+                if (authState.isInMulti()) {
+                    authState.markTxDirty();
+                }
+                return recordError(Errors.wrongArity(cmdName));
+            }
+            ctx.stats().recordCommand();
+            return handleTransactionCommand(cmdName, argv, authState);
+        }
+
         if (!spec.acceptsArgCount(argv.size())) {
+            if (authState.isInMulti()) {
+                authState.markTxDirty();
+            }
             return recordError(Errors.wrongArity(cmdName));
         }
+
+        if (authState.isInMulti()) {
+            authState.enqueue(argv);
+            return QUEUED;
+        }
+
         ctx.stats().recordCommand();
+        return executeSpec(spec, argv);
+    }
+
+    private Reply handleTransactionCommand(String cmdName, List<Bytes> argv, SessionAuthState authState) {
+        return switch (cmdName) {
+            case "multi" -> {
+                if (authState.isInMulti()) {
+                    yield recordError(new Reply.ErrorReply("ERR MULTI calls can not be nested"));
+                }
+                authState.beginMulti();
+                yield Reply.OK;
+            }
+            case "discard" -> {
+                if (!authState.isInMulti()) {
+                    yield recordError(new Reply.ErrorReply("ERR DISCARD without MULTI"));
+                }
+                authState.discardTransaction();
+                yield Reply.OK;
+            }
+            case "watch" -> {
+                if (authState.isInMulti()) {
+                    yield recordError(new Reply.ErrorReply("ERR WATCH inside MULTI is not allowed"));
+                }
+                for (int i = 1; i < argv.size(); i++) {
+                    Bytes key = argv.get(i);
+                    authState.watch(key, ctx.keyspace().keyVersion(key));
+                }
+                yield Reply.OK;
+            }
+            case "unwatch" -> {
+                authState.unwatch();
+                yield Reply.OK;
+            }
+            case "exec" -> executeTransaction(authState);
+            default -> throw new IllegalStateException("unexpected transaction command: " + cmdName);
+        };
+    }
+
+    private Reply executeTransaction(SessionAuthState authState) {
+        if (!authState.isInMulti()) {
+            return recordError(new Reply.ErrorReply("ERR EXEC without MULTI"));
+        }
+        boolean dirty = authState.isTxDirty();
+        List<List<Bytes>> queued = authState.drainQueue();
+        Map<Bytes, Long> watched = authState.drainWatched();
+        authState.discardTransaction();
+        if (dirty) {
+            return recordError(EXEC_ABORT_ERROR);
+        }
+        for (Map.Entry<Bytes, Long> entry : watched.entrySet()) {
+            if (ctx.keyspace().keyVersion(entry.getKey()) != entry.getValue()) {
+                return Reply.NULL_ARRAY;
+            }
+        }
+        List<Reply> results = new ArrayList<>(queued.size());
+        for (List<Bytes> cmdArgv : queued) {
+            CommandSpec spec = table.lookup(cmdArgv.getFirst()).orElseThrow();
+            ctx.stats().recordCommand();
+            results.add(executeSpec(spec, cmdArgv));
+        }
+        return Reply.array(results);
+    }
+
+    private Reply executeSpec(CommandSpec spec, List<Bytes> argv) {
+        String cmdName = spec.name();
         if (maxMemoryBytes > 0 && spec.flags().contains(CommandSpec.Flag.WRITE) && !freesMemory(cmdName)) {
             ctx.keyspace().evictIfNeeded(maxMemoryBytes, evictionPolicy, DEFAULT_EVICTION_SAMPLES);
             if (ctx.keyspace().usedMemoryBytes() > maxMemoryBytes) {

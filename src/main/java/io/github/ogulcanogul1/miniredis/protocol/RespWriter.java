@@ -10,6 +10,7 @@ public final class RespWriter {
 
     private static final byte[] CRLF = {'\r', '\n'};
     private static final byte[] NULL_BULK = {'$', '-', '1', '\r', '\n'};
+    private static final byte[] NULL_ARRAY = {'*', '-', '1', '\r', '\n'};
 
     private RespWriter() {}
 
@@ -36,6 +37,10 @@ public final class RespWriter {
             }
             case Reply.NullBulk n -> out.writeBytes(NULL_BULK);
             case Reply.ArrayReply a -> {
+                if (a == Reply.NULL_ARRAY) {
+                    out.writeBytes(NULL_ARRAY);
+                    return;
+                }
                 line(out, '*', Integer.toString(a.elements().size()));
                 for (Reply element : a.elements()) {
                     writeTo(element, out);

@@ -1,6 +1,8 @@
 package io.github.ogulcanogul1.miniredis.commands;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -19,6 +21,9 @@ public sealed interface Reply {
 
     /** {@code $-1}: the nil bulk string. */
     Reply NIL = new NullBulk();
+
+    /** {@code *-1}: the nil array (returned by aborted {@code EXEC} after {@code WATCH}). */
+    Reply NULL_ARRAY = new ArrayReply(NullArraySentinel.INSTANCE);
 
     /**
      * A simple string: {@code +text}.
@@ -57,11 +62,19 @@ public sealed interface Reply {
     /** The nil bulk string. Use {@link Reply#NIL}. */
     record NullBulk() implements Reply {}
 
-    /** An array: {@code *count elements}. The list is copied and cannot be changed. */
+    /** An array: {@code *count elements} (or {@link #NULL_ARRAY} for {@code *-1}). */
     record ArrayReply(List<Reply> elements) implements Reply {
         public ArrayReply {
-            elements = List.copyOf(elements); // also rejects null elements
+            if (elements != NullArraySentinel.INSTANCE) {
+                elements = List.copyOf(elements); // also rejects null and null elements
+            }
         }
+    }
+
+    final class NullArraySentinel {
+        static final List<Reply> INSTANCE = Collections.unmodifiableList(new ArrayList<>(0));
+
+        private NullArraySentinel() {}
     }
 
     static Reply simple(String text) {

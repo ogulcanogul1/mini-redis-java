@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -32,6 +33,8 @@ final class ShardedKeyspace implements Keyspace {
     private final int mask;
     private final Hasher<Bytes> hasher = Hasher.sipHash();
     private final Clock clock;
+    private final AtomicLong versionSeq = new AtomicLong();
+    private volatile long flushEpoch;
 
     ShardedKeyspace(int shardCount, LockType lockType) {
         this(shardCount, lockType, Clock.system());
@@ -505,6 +508,7 @@ final class ShardedKeyspace implements Keyspace {
             } else {
                 s.expires.put(key, expireAt);
             }
+            s.bumpVersion(key, versionSeq.incrementAndGet());
             return true;
         } finally {
             s.writeLock.unlock();
@@ -523,6 +527,7 @@ final class ShardedKeyspace implements Keyspace {
             }
             s.dict.remove(key);
             s.expires.remove(key);
+            s.bumpVersion(key, versionSeq.incrementAndGet());
             return true;
         } finally {
             s.writeLock.unlock();
@@ -544,6 +549,7 @@ final class ShardedKeyspace implements Keyspace {
                 if (s.purgeIfExpired(key, now)) {
                     s.dict.remove(key);
                     s.expires.remove(key);
+                    s.bumpVersion(key, versionSeq.incrementAndGet());
                     deleted++;
                 }
             }
@@ -595,6 +601,7 @@ final class ShardedKeyspace implements Keyspace {
             IncrResult result = KeyspaceSupport.computeIncrement(current == null ? null : current.asString(), delta);
             if (result instanceof IncrResult.Ok ok) {
                 s.dict.put(key, RedisObject.string(KeyspaceSupport.formatLong(ok.value()), now));
+                s.bumpVersion(key, versionSeq.incrementAndGet());
             }
             return result;
         } finally {
@@ -639,6 +646,7 @@ final class ShardedKeyspace implements Keyspace {
                 Shard s = shardFor(k);
                 s.dict.put(k, RedisObject.string(keysAndValues.get(i + 1), now));
                 s.expires.remove(k);
+                s.bumpVersion(k, versionSeq.incrementAndGet());
             }
             return null;
         });
@@ -661,9 +669,11 @@ final class ShardedKeyspace implements Keyspace {
             RedisObject val = srcShard.dict.get(source);
             if (!source.equals(target)) {
                 srcShard.dict.remove(source);
+                srcShard.bumpVersion(source, versionSeq.incrementAndGet());
                 Long ttl = srcShard.expires.remove(source);
                 Shard dstShard = shards[tIdx];
                 dstShard.dict.put(target, val);
+                dstShard.bumpVersion(target, versionSeq.incrementAndGet());
                 if (ttl == null) {
                     dstShard.expires.remove(target);
                 } else {
@@ -691,6 +701,7 @@ final class ShardedKeyspace implements Keyspace {
             } else {
                 s.expires.put(key, expireAt);
             }
+            s.bumpVersion(key, versionSeq.incrementAndGet());
             return true;
         } finally {
             s.writeLock.unlock();
@@ -713,6 +724,7 @@ final class ShardedKeyspace implements Keyspace {
             } else {
                 s.expires.put(key, expireAtMillis);
             }
+            s.bumpVersion(key, versionSeq.incrementAndGet());
             return true;
         } finally {
             s.writeLock.unlock();
@@ -892,12 +904,27 @@ final class ShardedKeyspace implements Keyspace {
             all[i] = i;
         }
         withShardLocks(all, true, () -> {
+            flushEpoch = versionSeq.incrementAndGet();
             for (Shard s : shards) {
                 s.dict.clear();
                 s.expires.clear();
+                s.versions.clear();
             }
             return null;
         });
+    }
+
+    @Override
+    public long keyVersion(Bytes key) {
+        Objects.requireNonNull(key, "key");
+        Shard s = shardFor(key);
+        s.readLock.lock();
+        try {
+            Long v = s.versions.get(key);
+            return (flushEpoch << 32) ^ (v != null ? v : 0L);
+        } finally {
+            s.readLock.unlock();
+        }
     }
 
     @Override
@@ -1012,12 +1039,14 @@ final class ShardedKeyspace implements Keyspace {
     private static final class Shard {
         private final Dict<Bytes, RedisObject> dict;
         private final Dict<Bytes, Long> expires;
+        private final Dict<Bytes, Long> versions;
         private final Lock readLock;
         private final Lock writeLock;
 
         Shard(LockType lockType, Hasher<Bytes> hasher) {
             this.dict = new Dict<>(hasher);
             this.expires = new Dict<>(hasher);
+            this.versions = new Dict<>(hasher);
             if (lockType == LockType.MUTEX) {
                 ReentrantLock mutex = new ReentrantLock();
                 this.readLock = mutex;
@@ -1047,6 +1076,10 @@ final class ShardedKeyspace implements Keyspace {
                 return false;
             }
             return true;
+        }
+
+        void bumpVersion(Bytes key, long seq) {
+            versions.put(key, seq);
         }
     }
 }
