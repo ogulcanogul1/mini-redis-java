@@ -34,6 +34,21 @@ final class KeyspaceSupport {
         return Bytes.ascii(Long.toString(value));
     }
 
+    static boolean isExpired(Long expireAtMillis, long nowMillis) {
+        return expireAtMillis != null && expireAtMillis <= nowMillis;
+    }
+
+    static long computeExpireAt(long nowMillis, long ttlMillis) {
+        if (ttlMillis <= 0) {
+            throw new IllegalArgumentException("ttlMillis must be positive, got " + ttlMillis);
+        }
+        try {
+            return Math.addExact(nowMillis, ttlMillis);
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("invalid expire time", e);
+        }
+    }
+
     static void validateNonNullKeys(List<Bytes> keys) {
         Objects.requireNonNull(keys, "keys");
         for (Bytes key : keys) {

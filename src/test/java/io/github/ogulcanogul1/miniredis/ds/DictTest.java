@@ -174,4 +174,19 @@ class DictTest {
         assertThat(it.hasNext()).isTrue();
         assertThat(it.next()).isNotNull();
     }
+
+    @Test
+    void sampleKeysReturnsDistinctSubsetWithoutMutating() {
+        Dict<Integer, Integer> dict = new Dict<>();
+        java.util.Random rng = new java.util.Random(42);
+        assertThat(dict.sampleKeys(5, rng)).isEmpty();
+        assertThatThrownBy(() -> dict.sampleKeys(0, rng)).isInstanceOf(IllegalArgumentException.class);
+
+        for (int i = 0; i < 20; i++) {
+            dict.put(i, i * 10);
+        }
+        var sample = dict.sampleKeys(5, rng);
+        assertThat(sample).hasSize(5).doesNotHaveDuplicates();
+        assertThat(dict.sampleKeys(50, rng)).hasSize(20).doesNotHaveDuplicates();
+    }
 }

@@ -1,9 +1,12 @@
 package io.github.ogulcanogul1.miniredis.ds;
 
+import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.random.RandomGenerator;
 
 /**
  * A hash table with separate chaining. Not thread-safe.
@@ -145,6 +148,32 @@ public final class Dict<K, V> implements Iterable<Dict.Entry<K, V>> {
 
     public boolean isEmpty() {
         return size == 0;
+    }
+
+    /**
+     * Returns up to {@code maxCount} distinct keys starting from a random bucket, without
+     * modifying the table (used by active expiration, K6).
+     *
+     * @throws IllegalArgumentException if {@code maxCount < 1}
+     */
+    public List<K> sampleKeys(int maxCount, RandomGenerator random) {
+        Objects.requireNonNull(random, "random");
+        if (maxCount < 1) {
+            throw new IllegalArgumentException("maxCount must be positive, got " + maxCount);
+        }
+        if (size == 0) {
+            return List.of();
+        }
+        int target = Math.min(maxCount, size);
+        List<K> result = new ArrayList<>(target);
+        int mask = table.length - 1;
+        int start = random.nextInt(table.length);
+        for (int step = 0; step < table.length && result.size() < target; step++) {
+            for (Entry<K, V> e = table[(start + step) & mask]; e != null && result.size() < target; e = e.next) {
+                result.add(e.key);
+            }
+        }
+        return result;
     }
 
     /** The current number of buckets. Package-private, for tests. */
