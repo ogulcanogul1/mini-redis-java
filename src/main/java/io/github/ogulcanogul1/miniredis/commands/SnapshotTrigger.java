@@ -26,4 +26,9 @@ public interface SnapshotTrigger {
      * @return {@code true} if started, {@code false} if a background save is already in progress
      */
     boolean bgsave();
+
+    /** Encodes a live in-memory snapshot for replication {@code PSYNC} full resync. */
+    default byte[] encodeSnapshot() {
+        return new byte[0];
+    }
 }
