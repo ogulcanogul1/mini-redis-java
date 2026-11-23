@@ -4,8 +4,11 @@ import ch.qos.logback.classic.Level;
 import io.github.ogulcanogul1.miniredis.commands.CommandContext;
 import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
+import io.github.ogulcanogul1.miniredis.commands.ServerStats;
 import io.github.ogulcanogul1.miniredis.net.ServerBackend;
 import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
+import io.github.ogulcanogul1.miniredis.net.ThreadPerConnServer;
+import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import java.io.IOException;
@@ -19,14 +22,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Composition root (PLAN §2.3): wires storage, commands, protocol session, and network backend, and
- * owns server lifecycle logging.
+ * Composition root (PLAN §2.3): wires sharded storage, stats, commands, protocol session, and the
+ * configured network backend, and owns server lifecycle logging.
  */
 public final class RedisServer implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(RedisServer.class);
 
     private final ServerConfig config;
+    private final ServerStats stats;
     private final ServerBackend backend;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -38,10 +42,22 @@ public final class RedisServer implements AutoCloseable {
     public RedisServer(ServerConfig config, CommandTable table) {
         this.config = Objects.requireNonNull(config, "config");
         Objects.requireNonNull(table, "table");
-        Keyspace keyspace = Keyspaces.inMemory();
-        Dispatcher dispatcher = new Dispatcher(table, new CommandContext(keyspace));
+        this.stats = new ServerStats();
+        Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType());
+        Dispatcher dispatcher = new Dispatcher(table, new CommandContext(keyspace, stats));
         this.backend = switch (config.ioModel()) {
-            case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits());
+            case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);
+            case THREAD_PER_CONN ->
+                new ThreadPerConnServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);
+            case THREAD_POOL ->
+                new ThreadPoolServer(
+                        config.bind(),
+                        config.port(),
+                        dispatcher,
+                        config.respLimits(),
+                        config.workerThreads(),
+                        config.queueCapacity(),
+                        stats);
         };
     }
 
@@ -74,11 +90,13 @@ public final class RedisServer implements AutoCloseable {
         backend.start();
         started.set(true);
         log.info(
-                "mini-redis {} listening on {}:{} (io-model={})",
+                "mini-redis {} listening on {}:{} (io-model={}, shards={}, lock-type={})",
                 version(),
                 config.bind(),
                 backend.port(),
-                config.ioModel().name().toLowerCase(Locale.ROOT));
+                config.ioModel().name().toLowerCase(Locale.ROOT),
+                config.shards(),
+                config.lockType().name().toLowerCase(Locale.ROOT));
     }
 
     /** Blocks until {@link #stop()} completes. */
@@ -102,6 +120,11 @@ public final class RedisServer implements AutoCloseable {
     /** Returns the bound TCP port, or {@code -1} before {@link #start()}. */
     public int port() {
         return backend.port();
+    }
+
+    /** Returns shared live server counters. */
+    public ServerStats stats() {
+        return stats;
     }
 
     private static void applyLogLevel(ServerConfig.LogLevel logLevel) {
