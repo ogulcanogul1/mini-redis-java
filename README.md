@@ -4,7 +4,7 @@
 
 A Redis-compatible in-memory key-value store written from scratch in Java 21, as a learning project.
 
-> **Status:** Phase 4 complete (multithreaded TCP server with custom `ThreadPool` & `BoundedBlockingQueue`, 16-shard `ShardedKeyspace` with ascending global lock ordering, `thread-pool` and `thread-per-conn` backends, atomic counters & multi-key commands, and 12 Redis 7.0.15 differential test scenarios). Virtual threads, NIO selector, and multi-reactor arrive in Phase 5.
+> **Status:** Phase 5 complete (Java 21 `VirtualThreadServer`, non-blocking NIO `Selector` + `NioConnection` + `MultiReactorServer` with `io-threads=4` default, `Clock` abstraction (K8), output-buffer backpressure & idle timeout, `C10kStressTest` 1,000 concurrent connections, and open-loop `HdrHistogram` load generator; TTL expiration and AOF persistence arrive next for v1.0).
 
 ## Requirements
 
@@ -26,7 +26,7 @@ mvn -B verify
 
 This compiles the code, checks formatting (Spotless), runs unit tests (Surefire), ArchUnit architecture rules, JaCoCo coverage report, and TCP integration tests (`*IT`, Failsafe).
 
-To run concurrency stress tests (`ConcurrencyStressTest`):
+To run concurrency and connection stress tests (`ConcurrencyStressTest`, `C10kStressTest`):
 
 ```bash
 mvn -B verify -Pstress
@@ -57,7 +57,9 @@ java -cp "target/classes:target/lib/*" io.github.ogulcanogul1.miniredis.Main --p
 
 Configuration can be supplied via a Redis-style config file (`key value` lines) as the first argument and/or CLI overrides:
 - `--bind <addr>` (default `127.0.0.1`), `--port <port>` (default `6380`)
-- `--io-model <thread-pool|thread-per-conn|single>` (default `thread-pool`)
+- `--io-model <multi-reactor|virtual|thread-pool|thread-per-conn|single>` (default `multi-reactor`)
+- `--io-threads <n>` (default `4`; `1` = single-threaded Redis-style event loop), `--maxclients <n>` (default `10000`)
+- `--client-output-buffer-limit <bytes>` (default `16777216`), `--idle-timeout-seconds <sec>` (default `0`, disabled)
 - `--worker-threads <n>` (default `8`), `--queue-capacity <n>` (default `256`)
 - `--shards <power-of-two>` (default `16`), `--lock-type <rwlock|mutex>` (default `rwlock`)
 - `--loglevel <debug|verbose|notice|warning>` (default `notice`), `--proto-max-bulk-len <bytes>` (default `536870912`)
@@ -93,7 +95,9 @@ Sharded storage uses ascending shard-index lock ordering (`ShardedKeyspace`, K3)
 
 - **`ShardedKeyspaceTest`:** `8` threads × `2,000` concurrent `INCR` operations (`16,000` exact) alongside `2` threads running `500` cross-shard `MSET`, `MGET`, and `RENAME` loops in opposite key orders — confirms ascending shard locking prevents deadlocks and multi-key reads/writes never observe partial updates.
 - **`MultiClientServerIT`:** `16` concurrent TCP clients × `100` `INCR` operations (`1,600` exact) over real sockets in both `thread-per-conn` and `thread-pool` models, plus verification that an idle client does not block other clients.
+- **`MultiReactorServerIT`:** `16` concurrent TCP clients × `100` `INCR` operations (`1,600` exact) plus split-write, idle-client, and `QUIT` verification across `virtual`, `multi-reactor` (`io-threads=4`), and single-reactor (`io-threads=1`) configurations.
 - **`ConcurrencyStressTest` (`mvn -B verify -Pstress`):** `24` concurrent TCP clients × `500` `INCR` operations (`12,000` exact) interleaved with cross-shard `MSET`/`MGET` pairs, finishing with `0` lost updates and `0` deadlocks.
+- **`C10kStressTest` (`mvn -B verify -Pstress`):** `1,000` simultaneous open TCP connections maintained across `4` NIO `ReactorEventLoop` threads (`io-model=multi-reactor`), executing `PING` and `INCR` on every connection with `0` leaked clients after clean shutdown.
 
 ## Compatibility (Redis 7.0.15)
 
