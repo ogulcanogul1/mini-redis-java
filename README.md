@@ -4,7 +4,7 @@
 
 A Redis-compatible in-memory key-value store written from scratch in Java 21, as a learning project.
 
-> **Status:** Phase 3 complete (single-client blocking TCP server with RESP2, CLI/config parser, and Redis 7.0.15 differential tests). Multithreading, thread pool, and sharded locking arrive in Phase 4.
+> **Status:** Phase 4 complete (multithreaded TCP server with custom `ThreadPool` & `BoundedBlockingQueue`, 16-shard `ShardedKeyspace` with ascending global lock ordering, `thread-pool` and `thread-per-conn` backends, atomic counters & multi-key commands, and 12 Redis 7.0.15 differential test scenarios). Virtual threads, NIO selector, and multi-reactor arrive in Phase 5.
 
 ## Requirements
 
@@ -15,7 +15,8 @@ A Redis-compatible in-memory key-value store written from scratch in Java 21, as
 ## Supported Commands
 
 - Connection: `PING [message]`, `ECHO message`, `QUIT`
-- Strings & Keys: `SET key value`, `GET key`, `DEL key [key ...]`, `EXISTS key [key ...]`, `KEYS pattern`, `DBSIZE`, `FLUSHDB`
+- Strings & Atomic Counters: `SET key value`, `GET key`, `INCR key`, `DECR key`, `INCRBY key increment`, `DECRBY key decrement`, `MGET key [key ...]`, `MSET key value [key value ...]`
+- Keys: `DEL key [key ...]`, `EXISTS key [key ...]`, `RENAME source target`, `KEYS pattern`, `DBSIZE`, `FLUSHDB`
 
 ## Build & Test
 
@@ -24,6 +25,12 @@ mvn -B verify
 ```
 
 This compiles the code, checks formatting (Spotless), runs unit tests (Surefire), ArchUnit architecture rules, JaCoCo coverage report, and TCP integration tests (`*IT`, Failsafe).
+
+To run concurrency stress tests (`ConcurrencyStressTest`):
+
+```bash
+mvn -B verify -Pstress
+```
 
 To run only unit tests:
 
@@ -47,6 +54,13 @@ Build the JAR and copy runtime dependencies (`slf4j-api`, `logback-classic`, etc
 mvn -B -DskipTests package dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/lib
 java -cp "target/classes:target/lib/*" io.github.ogulcanogul1.miniredis.Main --port 6380
 ```
+
+Configuration can be supplied via a Redis-style config file (`key value` lines) as the first argument and/or CLI overrides:
+- `--bind <addr>` (default `127.0.0.1`), `--port <port>` (default `6380`)
+- `--io-model <thread-pool|thread-per-conn|single>` (default `thread-pool`)
+- `--worker-threads <n>` (default `8`), `--queue-capacity <n>` (default `256`)
+- `--shards <power-of-two>` (default `16`), `--lock-type <rwlock|mutex>` (default `rwlock`)
+- `--loglevel <debug|verbose|notice|warning>` (default `notice`), `--proto-max-bulk-len <bytes>` (default `536870912`)
 
 On Windows PowerShell/CMD use `;` instead of `:` in `-cp`: `"target/classes;target/lib/*"`.
 
@@ -73,11 +87,20 @@ Test with `redis-cli`:
 docker run --rm redis:7.0.15 redis-cli -h host.docker.internal -p 6380 PING
 ```
 
+## Concurrency Correctness
+
+Sharded storage uses ascending shard-index lock ordering (`ShardedKeyspace`, K3) so single-key read-modify-write operations and cross-shard multi-key operations remain atomic without deadlocks:
+
+- **`ShardedKeyspaceTest`:** `8` threads × `2,000` concurrent `INCR` operations (`16,000` exact) alongside `2` threads running `500` cross-shard `MSET`, `MGET`, and `RENAME` loops in opposite key orders — confirms ascending shard locking prevents deadlocks and multi-key reads/writes never observe partial updates.
+- **`MultiClientServerIT`:** `16` concurrent TCP clients × `100` `INCR` operations (`1,600` exact) over real sockets in both `thread-per-conn` and `thread-pool` models, plus verification that an idle client does not block other clients.
+- **`ConcurrencyStressTest` (`mvn -B verify -Pstress`):** `24` concurrent TCP clients × `500` `INCR` operations (`12,000` exact) interleaved with cross-shard `MSET`/`MGET` pairs, finishing with `0` lost updates and `0` deadlocks.
+
 ## Compatibility (Redis 7.0.15)
 
-`RedisCompatIT` (`mvn -B verify -Pcompat`, run in CI against the `redis:7.0.15` service container) sends identical raw RESP2 byte streams to both Redis `7.0.15` and `mini-redis` and asserts byte-for-byte identical wire replies and connection-close behavior across **11 differential scenarios** in [faz-03.txt](src/test/resources/compat/faz-03.txt):
+`RedisCompatIT` (`mvn -B verify -Pcompat`, run in CI against the `redis:7.0.15` service container) sends identical raw RESP2 byte streams to both Redis `7.0.15` and `mini-redis` and asserts byte-for-byte identical wire replies and connection-close behavior across **12 differential scenarios** in [faz-03.txt](src/test/resources/compat/faz-03.txt):
 
 - Multibulk and inline `PING`, `ECHO`, `SET`, `GET`, `DBSIZE`, `FLUSHDB`
+- Atomic `INCR`, `DECR`, `INCRBY`, `DECRBY` (including `Long.MAX_VALUE`/`Long.MIN_VALUE` overflow, `ERR decrement would overflow` for `-Long.MIN_VALUE`, and non-integer rejection for `01`/`" 1"`/`""`) and multi-key `MSET`, `MGET`, `RENAME`
 - Binary-safe keys and values, `DEL`, `EXISTS`, `KEYS` (unordered comparison for `KEYS *`), and pipelined commands
 - Command errors (`arity`, case-insensitive command names, `FLUSHDB extra`, empty bulk command name) and Redis-matching `128`-byte error argument truncation and `\r`/`\n` sanitization
 - Inline command whitespace (`\r`, `\n`, `\t`, `\v`), single/double/hex escapes (`\xHH`), ignored non-positive multibulk counts (`*0`, `*-1`, `*-5`), and unchecked trailing bytes after bulk payload
