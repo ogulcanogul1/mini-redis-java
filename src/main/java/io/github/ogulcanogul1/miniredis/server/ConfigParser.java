@@ -98,6 +98,7 @@ public final class ConfigParser {
         private AofFsyncPolicy appendFsync;
         private long maxMemoryBytes;
         private EvictionPolicy maxMemoryPolicy;
+        private String dbFilename;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -118,6 +119,7 @@ public final class ConfigParser {
             this.appendFsync = base.appendFsync();
             this.maxMemoryBytes = base.maxMemoryBytes();
             this.maxMemoryPolicy = base.maxMemoryPolicy();
+            this.dbFilename = base.dbFilename();
         }
 
         void apply(String rawKey, String value) {
@@ -198,6 +200,12 @@ public final class ConfigParser {
                         case "volatile-random" -> EvictionPolicy.VOLATILE_RANDOM;
                         default -> throw new ConfigException("invalid maxmemory-policy: " + value);
                     };
+                case "dbfilename" -> {
+                    if (value.isBlank()) {
+                        throw new ConfigException("dbfilename must not be blank");
+                    }
+                    this.dbFilename = value;
+                }
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
@@ -221,7 +229,8 @@ public final class ConfigParser {
                     appendFilename,
                     appendFsync,
                     maxMemoryBytes,
-                    maxMemoryPolicy);
+                    maxMemoryPolicy,
+                    dbFilename);
         }
 
         private static int parseInt(String key, String value) {

@@ -250,4 +250,42 @@ final class KeyspaceSupport {
         }
         return List.copyOf(out);
     }
+
+    static SnapshotEntry toSnapshotEntry(Bytes key, RedisObject obj, Long expireAtMillis) {
+        long exp = expireAtMillis == null ? -1L : expireAtMillis;
+        SnapshotEntry.Value val = switch (obj) {
+            case RedisObject.StringObj s -> new SnapshotEntry.StringVal(s.value());
+            case RedisObject.ListObj l -> new SnapshotEntry.ListVal(List.copyOf(l.deque()));
+            case RedisObject.HashObj h -> new SnapshotEntry.HashVal(getAllHash(h));
+            case RedisObject.SetObj s -> new SnapshotEntry.SetVal(allSetMembers(s));
+            case RedisObject.ZSetObj z -> new SnapshotEntry.ZSetVal(rangeZSet(z, 0, -1));
+        };
+        return new SnapshotEntry(key, exp, val);
+    }
+
+    static RedisObject fromSnapshotValue(SnapshotEntry.Value val, long nowMillis) {
+        return switch (val) {
+            case SnapshotEntry.StringVal s -> RedisObject.string(s.value(), nowMillis);
+            case SnapshotEntry.ListVal l -> {
+                RedisObject.ListObj obj = RedisObject.list(nowMillis);
+                pushList(obj, l.elements(), false);
+                yield obj;
+            }
+            case SnapshotEntry.HashVal h -> {
+                RedisObject.HashObj obj = RedisObject.hash(nowMillis);
+                setHash(obj, h.fieldsAndValues());
+                yield obj;
+            }
+            case SnapshotEntry.SetVal s -> {
+                RedisObject.SetObj obj = RedisObject.set(nowMillis);
+                addSet(obj, s.members());
+                yield obj;
+            }
+            case SnapshotEntry.ZSetVal z -> {
+                RedisObject.ZSetObj obj = RedisObject.zset(nowMillis);
+                addZSet(obj, z.entries());
+                yield obj;
+            }
+        };
+    }
 }
