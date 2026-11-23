@@ -18,10 +18,16 @@ public final class Dispatcher {
 
     private final CommandTable table;
     private final CommandContext ctx;
+    private final WriteListener writeListener;
 
     public Dispatcher(CommandTable table, CommandContext ctx) {
+        this(table, ctx, (spec, argv, reply) -> {});
+    }
+
+    public Dispatcher(CommandTable table, CommandContext ctx, WriteListener writeListener) {
         this.table = Objects.requireNonNull(table, "table");
         this.ctx = Objects.requireNonNull(ctx, "ctx");
+        this.writeListener = Objects.requireNonNull(writeListener, "writeListener");
     }
 
     /**
@@ -47,7 +53,11 @@ public final class Dispatcher {
         }
         ctx.stats().recordCommand();
         try {
-            return spec.handler().execute(ctx, argv);
+            Reply reply = spec.handler().execute(ctx, argv);
+            if (spec.flags().contains(CommandSpec.Flag.WRITE) && !(reply instanceof Reply.ErrorReply)) {
+                writeListener.onWrite(spec, argv, reply);
+            }
+            return reply;
         } catch (RuntimeException e) {
             log.error("unexpected error while executing command '{}'", spec.name(), e);
             return Errors.INTERNAL_ERROR;

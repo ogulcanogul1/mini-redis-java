@@ -1,5 +1,6 @@
 package io.github.ogulcanogul1.miniredis.server;
 
+import io.github.ogulcanogul1.miniredis.persistence.AofFsyncPolicy;
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
 import io.github.ogulcanogul1.miniredis.storage.LockType;
 import java.io.IOException;
@@ -91,6 +92,9 @@ public final class ConfigParser {
         private int maxClients;
         private long clientOutputBufferLimit;
         private long idleTimeoutSeconds;
+        private boolean appendOnly;
+        private String appendFilename;
+        private AofFsyncPolicy appendFsync;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -106,6 +110,9 @@ public final class ConfigParser {
             this.maxClients = base.maxClients();
             this.clientOutputBufferLimit = base.clientOutputBufferLimit();
             this.idleTimeoutSeconds = base.idleTimeoutSeconds();
+            this.appendOnly = base.appendOnly();
+            this.appendFilename = base.appendFilename();
+            this.appendFsync = base.appendFsync();
         }
 
         void apply(String rawKey, String value) {
@@ -157,6 +164,25 @@ public final class ConfigParser {
                 case "maxclients" -> this.maxClients = parseInt(key, value);
                 case "client-output-buffer-limit" -> this.clientOutputBufferLimit = parseLong(key, value);
                 case "idle-timeout-seconds" -> this.idleTimeoutSeconds = parseLong(key, value);
+                case "appendonly" ->
+                    this.appendOnly = switch (value.toLowerCase(Locale.ROOT)) {
+                        case "yes" -> true;
+                        case "no" -> false;
+                        default -> throw new ConfigException("invalid appendonly: " + value);
+                    };
+                case "appendfilename" -> {
+                    if (value.isBlank()) {
+                        throw new ConfigException("appendfilename must not be blank");
+                    }
+                    this.appendFilename = value;
+                }
+                case "appendfsync" ->
+                    this.appendFsync = switch (value.toLowerCase(Locale.ROOT)) {
+                        case "always" -> AofFsyncPolicy.ALWAYS;
+                        case "everysec" -> AofFsyncPolicy.EVERYSEC;
+                        case "no" -> AofFsyncPolicy.NO;
+                        default -> throw new ConfigException("invalid appendfsync: " + value);
+                    };
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
@@ -175,7 +201,10 @@ public final class ConfigParser {
                     ioThreads,
                     maxClients,
                     clientOutputBufferLimit,
-                    idleTimeoutSeconds);
+                    idleTimeoutSeconds,
+                    appendOnly,
+                    appendFilename,
+                    appendFsync);
         }
 
         private static int parseInt(String key, String value) {
