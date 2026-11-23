@@ -1,6 +1,7 @@
 package io.github.ogulcanogul1.miniredis.server;
 
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
+import io.github.ogulcanogul1.miniredis.storage.LockType;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -82,6 +83,10 @@ public final class ConfigParser {
         private ServerConfig.IoModel ioModel;
         private ServerConfig.LogLevel logLevel;
         private RespLimits respLimits;
+        private int workerThreads;
+        private int queueCapacity;
+        private int shards;
+        private LockType lockType;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -89,6 +94,10 @@ public final class ConfigParser {
             this.ioModel = base.ioModel();
             this.logLevel = base.logLevel();
             this.respLimits = base.respLimits();
+            this.workerThreads = base.workerThreads();
+            this.queueCapacity = base.queueCapacity();
+            this.shards = base.shards();
+            this.lockType = base.lockType();
         }
 
         void apply(String rawKey, String value) {
@@ -104,6 +113,8 @@ public final class ConfigParser {
                 case "io-model" ->
                     this.ioModel = switch (value.toLowerCase(Locale.ROOT)) {
                         case "single" -> ServerConfig.IoModel.SINGLE;
+                        case "thread-per-conn" -> ServerConfig.IoModel.THREAD_PER_CONN;
+                        case "thread-pool" -> ServerConfig.IoModel.THREAD_POOL;
                         default -> throw new ConfigException("unsupported io-model: " + value);
                     };
                 case "loglevel" ->
@@ -123,12 +134,22 @@ public final class ConfigParser {
                         throw new ConfigException("invalid proto-max-bulk-len: " + e.getMessage(), e);
                     }
                 }
+                case "worker-threads" -> this.workerThreads = parseInt(key, value);
+                case "queue-capacity" -> this.queueCapacity = parseInt(key, value);
+                case "shards" -> this.shards = parseInt(key, value);
+                case "lock-type" ->
+                    this.lockType = switch (value.toLowerCase(Locale.ROOT)) {
+                        case "mutex" -> LockType.MUTEX;
+                        case "rwlock" -> LockType.RWLOCK;
+                        default -> throw new ConfigException("invalid lock-type: " + value);
+                    };
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
 
         ServerConfig build() {
-            return new ServerConfig(bind, port, ioModel, logLevel, respLimits);
+            return new ServerConfig(
+                    bind, port, ioModel, logLevel, respLimits, workerThreads, queueCapacity, shards, lockType);
         }
 
         private static int parseInt(String key, String value) {

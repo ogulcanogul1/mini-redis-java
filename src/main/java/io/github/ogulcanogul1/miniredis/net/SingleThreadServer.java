@@ -1,12 +1,9 @@
 package io.github.ogulcanogul1.miniredis.net;
 
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
+import io.github.ogulcanogul1.miniredis.commands.ServerStats;
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
-import io.github.ogulcanogul1.miniredis.protocol.RespSession;
-import java.io.BufferedOutputStream;
-import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -26,13 +23,13 @@ public final class SingleThreadServer implements ServerBackend {
 
     private static final Logger log = LoggerFactory.getLogger(SingleThreadServer.class);
 
-    static final int READ_BUFFER_SIZE = 16 * 1024;
-    private static final long STOP_TIMEOUT_SECONDS = 5;
+    static final int READ_BUFFER_SIZE = ClientSessionLoop.READ_BUFFER_SIZE;
 
     private final String bindAddress;
     private final int configuredPort;
     private final Dispatcher dispatcher;
     private final RespLimits limits;
+    private final ServerStats stats;
     private final Object lifecycleLock = new Object();
     private final Object clientLock = new Object();
     private final CountDownLatch terminated = new CountDownLatch(1);
@@ -44,6 +41,11 @@ public final class SingleThreadServer implements ServerBackend {
     private Socket currentClient;
 
     public SingleThreadServer(String bindAddress, int port, Dispatcher dispatcher, RespLimits limits) {
+        this(bindAddress, port, dispatcher, limits, new ServerStats());
+    }
+
+    public SingleThreadServer(
+            String bindAddress, int port, Dispatcher dispatcher, RespLimits limits, ServerStats stats) {
         this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
         if (port < 0 || port > 65535) {
             throw new IllegalArgumentException("port out of range: " + port);
@@ -51,6 +53,7 @@ public final class SingleThreadServer implements ServerBackend {
         this.configuredPort = port;
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.stats = Objects.requireNonNull(stats, "stats");
     }
 
     @Override
@@ -65,7 +68,7 @@ public final class SingleThreadServer implements ServerBackend {
                 socket.setReuseAddress(true);
                 socket.bind(new InetSocketAddress(InetAddress.getByName(bindAddress), configuredPort));
             } catch (IOException e) {
-                closeQuietly(socket);
+                ClientSessionLoop.closeQuietly(socket);
                 throw e;
             }
             this.serverSocket = socket;
@@ -100,12 +103,12 @@ public final class SingleThreadServer implements ServerBackend {
         synchronized (clientLock) {
             clientToClose = currentClient;
         }
-        closeQuietly(clientToClose);
-        closeQuietly(toClose);
+        ClientSessionLoop.closeQuietly(clientToClose);
+        ClientSessionLoop.closeQuietly(toClose);
         if (worker != null && Thread.currentThread() != worker) {
             try {
-                if (!terminated.await(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    log.warn("accept-single did not terminate within {}s", STOP_TIMEOUT_SECONDS);
+                if (!terminated.await(ClientSessionLoop.STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    log.warn("accept-single did not terminate within {}s", ClientSessionLoop.STOP_TIMEOUT_SECONDS);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -133,61 +136,23 @@ public final class SingleThreadServer implements ServerBackend {
                 }
                 synchronized (clientLock) {
                     if (!running) {
-                        closeQuietly(client);
+                        ClientSessionLoop.closeQuietly(client);
                         break;
                     }
                     currentClient = client;
                 }
-                handleClient(nextClientId++, client);
+                try {
+                    ClientSessionLoop.serve(nextClientId++, client, dispatcher, limits, stats, () -> running, log);
+                } finally {
+                    synchronized (clientLock) {
+                        currentClient = null;
+                    }
+                }
             }
         } finally {
             running = false;
-            closeQuietly(serverSocket);
+            ClientSessionLoop.closeQuietly(serverSocket);
             terminated.countDown();
-        }
-    }
-
-    private void handleClient(long clientId, Socket client) {
-        String remote = String.valueOf(client.getRemoteSocketAddress());
-        log.debug("client={} addr={} connected", clientId, remote);
-        try {
-            client.setTcpNoDelay(true);
-            InputStream in = client.getInputStream();
-            BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream());
-            byte[] readBuf = new byte[READ_BUFFER_SIZE];
-            RespSession session = new RespSession(dispatcher, limits);
-
-            while (running && !session.shouldClose()) {
-                int n = in.read(readBuf);
-                if (n < 0) {
-                    break;
-                }
-                byte[] reply = session.onData(readBuf, 0, n);
-                if (reply.length > 0) {
-                    out.write(reply);
-                    out.flush();
-                }
-            }
-        } catch (IOException e) {
-            if (running) {
-                log.debug("client={} addr={} connection error: {}", clientId, remote, e.getMessage());
-            }
-        } finally {
-            synchronized (clientLock) {
-                currentClient = null;
-            }
-            closeQuietly(client);
-            log.debug("client={} addr={} closed", clientId, remote);
-        }
-    }
-
-    private static void closeQuietly(Closeable resource) {
-        if (resource != null) {
-            try {
-                resource.close();
-            } catch (IOException ignored) {
-                // Closing during shutdown or cleanup; nothing actionable to do.
-            }
         }
     }
 }
