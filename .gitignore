@@ -5,3 +5,6 @@ target/
 *.hprof
 *.jfr
 docs/adr/
+# K13: raw benchmark logs and JFR recordings are part of a recorded run
+!bench/results/**/*.log
+!bench/results/**/*.jfr
