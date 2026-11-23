@@ -7,6 +7,6 @@ public final class Keyspaces {
 
     /** Returns a new, empty, single-threaded in-memory keyspace. */
     public static Keyspace inMemory() {
-        return new HashMapKeyspace();
+        return new DictKeyspace();
     }
 }
