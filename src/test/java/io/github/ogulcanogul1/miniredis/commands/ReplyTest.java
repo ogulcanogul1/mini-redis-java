@@ -68,4 +68,12 @@ class ReplyTest {
         assertThatThrownBy(() -> Reply.bulk(null)).isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> Reply.array(null)).isInstanceOf(NullPointerException.class);
     }
+
+    @Test
+    void simpleAndErrorRepliesRejectLineBreaks() {
+        assertThatThrownBy(() -> Reply.simple("a\rb")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Reply.simple("a\nb")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Reply.error("ERR a\r\nb")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(Reply.simple("a\tb")).isEqualTo(new Reply.SimpleString("a\tb"));
+    }
 }
