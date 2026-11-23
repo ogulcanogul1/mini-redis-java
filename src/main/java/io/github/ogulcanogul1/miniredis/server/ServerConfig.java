@@ -2,6 +2,7 @@ package io.github.ogulcanogul1.miniredis.server;
 
 import io.github.ogulcanogul1.miniredis.persistence.AofFsyncPolicy;
 import io.github.ogulcanogul1.miniredis.protocol.RespLimits;
+import io.github.ogulcanogul1.miniredis.storage.EvictionPolicy;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import io.github.ogulcanogul1.miniredis.storage.LockType;
 import java.util.Objects;
@@ -39,7 +40,9 @@ public record ServerConfig(
         long idleTimeoutSeconds,
         boolean appendOnly,
         String appendFilename,
-        AofFsyncPolicy appendFsync) {
+        AofFsyncPolicy appendFsync,
+        long maxMemoryBytes,
+        EvictionPolicy maxMemoryPolicy) {
 
     /** Localhost only: safe default. */
     public static final String DEFAULT_BIND = "127.0.0.1";
@@ -58,6 +61,8 @@ public record ServerConfig(
     public static final boolean DEFAULT_APPEND_ONLY = false;
     public static final String DEFAULT_APPEND_FILENAME = "appendonly.aof";
     public static final AofFsyncPolicy DEFAULT_APPEND_FSYNC = AofFsyncPolicy.EVERYSEC;
+    public static final long DEFAULT_MAX_MEMORY_BYTES = 0L;
+    public static final EvictionPolicy DEFAULT_MAX_MEMORY_POLICY = EvictionPolicy.NOEVICTION;
 
     /** Supported I/O backend models (K2). */
     public enum IoModel {
@@ -112,6 +117,10 @@ public record ServerConfig(
             throw new ConfigException("appendfilename must not be blank");
         }
         Objects.requireNonNull(appendFsync, "appendFsync");
+        if (maxMemoryBytes < 0) {
+            throw new ConfigException("maxmemory must be >= 0, got " + maxMemoryBytes);
+        }
+        Objects.requireNonNull(maxMemoryPolicy, "maxMemoryPolicy");
     }
 
     /** Backward-compatible 5-argument constructor using default pool, sharding, and reactor settings. */
@@ -189,6 +198,45 @@ public record ServerConfig(
                 DEFAULT_APPEND_FSYNC);
     }
 
+    /** Backward-compatible 16-argument constructor using default unlimited memory ({@code maxmemory=0}). */
+    public ServerConfig(
+            String bind,
+            int port,
+            IoModel ioModel,
+            LogLevel logLevel,
+            RespLimits respLimits,
+            int workerThreads,
+            int queueCapacity,
+            int shards,
+            LockType lockType,
+            int ioThreads,
+            int maxClients,
+            long clientOutputBufferLimit,
+            long idleTimeoutSeconds,
+            boolean appendOnly,
+            String appendFilename,
+            AofFsyncPolicy appendFsync) {
+        this(
+                bind,
+                port,
+                ioModel,
+                logLevel,
+                respLimits,
+                workerThreads,
+                queueCapacity,
+                shards,
+                lockType,
+                ioThreads,
+                maxClients,
+                clientOutputBufferLimit,
+                idleTimeoutSeconds,
+                appendOnly,
+                appendFilename,
+                appendFsync,
+                DEFAULT_MAX_MEMORY_BYTES,
+                DEFAULT_MAX_MEMORY_POLICY);
+    }
+
     /** Returns the default configuration ({@code 127.0.0.1:6380}, {@code multi-reactor}, {@code 4} I/O threads, {@code 16} rwlock shards). */
     public static ServerConfig defaults() {
         return onPort(DEFAULT_PORT);
@@ -212,6 +260,8 @@ public record ServerConfig(
                 DEFAULT_IDLE_TIMEOUT_SECONDS,
                 DEFAULT_APPEND_ONLY,
                 DEFAULT_APPEND_FILENAME,
-                DEFAULT_APPEND_FSYNC);
+                DEFAULT_APPEND_FSYNC,
+                DEFAULT_MAX_MEMORY_BYTES,
+                DEFAULT_MAX_MEMORY_POLICY);
     }
 }

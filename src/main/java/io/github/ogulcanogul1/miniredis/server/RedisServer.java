@@ -68,10 +68,11 @@ public final class RedisServer implements AutoCloseable {
             } catch (IOException e) {
                 throw new UncheckedIOException("failed to initialize AOF at " + aofPath, e);
             }
-            dispatcher = new Dispatcher(table, ctx, aofAppender);
+            dispatcher = new Dispatcher(table, ctx, aofAppender, config.maxMemoryBytes(), config.maxMemoryPolicy());
         } else {
             this.aofAppender = null;
-            dispatcher = new Dispatcher(table, ctx);
+            dispatcher = new Dispatcher(
+                    table, ctx, (spec, argv, reply) -> {}, config.maxMemoryBytes(), config.maxMemoryPolicy());
         }
         this.backend = switch (config.ioModel()) {
             case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);

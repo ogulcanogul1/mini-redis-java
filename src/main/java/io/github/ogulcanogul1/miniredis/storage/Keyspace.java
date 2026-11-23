@@ -173,6 +173,17 @@ public interface Keyspace {
     /** Returns the number of keys (approximate under concurrent lazy expiration, K6). */
     int size();
 
+    /** Returns estimated heap bytes occupied by stored keys and values. */
+    long usedMemoryBytes();
+
+    /**
+     * Evicts keys according to {@code policy} using {@code sampleSize} candidates per step until
+     * {@link #usedMemoryBytes()} is at or below {@code maxMemoryBytes} or no eligible keys remain.
+     *
+     * @return number of evicted keys
+     */
+    int evictIfNeeded(long maxMemoryBytes, EvictionPolicy policy, int sampleSize);
+
     /** Deletes every key and expiration. */
     void flush();
 

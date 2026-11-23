@@ -565,6 +565,63 @@ final class DictKeyspace implements Keyspace {
     }
 
     @Override
+    public long usedMemoryBytes() {
+        long total = 0L;
+        for (Dict.Entry<Bytes, RedisObject> e : dict) {
+            total += MemoryEstimator.estimateEntry(e.key(), e.value());
+        }
+        return total;
+    }
+
+    @Override
+    public int evictIfNeeded(long maxMemoryBytes, EvictionPolicy policy, int sampleSize) {
+        Objects.requireNonNull(policy, "policy");
+        if (sampleSize < 1) {
+            throw new IllegalArgumentException("sampleSize must be positive, got " + sampleSize);
+        }
+        if (maxMemoryBytes <= 0 || policy == EvictionPolicy.NOEVICTION) {
+            return 0;
+        }
+        boolean volatileOnly = policy == EvictionPolicy.VOLATILE_LRU || policy == EvictionPolicy.VOLATILE_RANDOM;
+        boolean lru = policy == EvictionPolicy.ALLKEYS_LRU || policy == EvictionPolicy.VOLATILE_LRU;
+        long used = usedMemoryBytes();
+        int evicted = 0;
+        while (used > maxMemoryBytes) {
+            List<Bytes> sample = (volatileOnly ? expires : dict).sampleKeys(sampleSize, ThreadLocalRandom.current());
+            if (sample.isEmpty()) {
+                break;
+            }
+            Bytes victim = pickVictim(dict, sample, lru);
+            if (victim == null) {
+                break;
+            }
+            RedisObject removed = dict.remove(victim);
+            expires.remove(victim);
+            if (removed != null) {
+                used -= MemoryEstimator.estimateEntry(victim, removed);
+                evicted++;
+            }
+        }
+        return evicted;
+    }
+
+    private static Bytes pickVictim(Dict<Bytes, RedisObject> dict, List<Bytes> sample, boolean lru) {
+        if (!lru) {
+            return sample.getFirst();
+        }
+        Bytes best = null;
+        long oldestLru = Long.MAX_VALUE;
+        for (Bytes key : sample) {
+            RedisObject obj = dict.get(key);
+            if (obj != null && (best == null || obj.lru() < oldestLru)) {
+                oldestLru = obj.lru();
+                best = key;
+            }
+        }
+        return best;
+    }
+
+    @Override
     public void flush() {
         dict.clear();
         expires.clear();

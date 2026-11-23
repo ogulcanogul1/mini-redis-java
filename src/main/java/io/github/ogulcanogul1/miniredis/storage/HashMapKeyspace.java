@@ -556,6 +556,55 @@ final class HashMapKeyspace implements Keyspace {
     }
 
     @Override
+    public long usedMemoryBytes() {
+        long total = 0L;
+        for (Map.Entry<Bytes, RedisObject> e : map.entrySet()) {
+            total += MemoryEstimator.estimateEntry(e.getKey(), e.getValue());
+        }
+        return total;
+    }
+
+    @Override
+    public int evictIfNeeded(long maxMemoryBytes, EvictionPolicy policy, int sampleSize) {
+        Objects.requireNonNull(policy, "policy");
+        if (maxMemoryBytes <= 0 || policy == EvictionPolicy.NOEVICTION) {
+            return 0;
+        }
+        boolean volatileOnly = policy == EvictionPolicy.VOLATILE_LRU || policy == EvictionPolicy.VOLATILE_RANDOM;
+        boolean lru = policy == EvictionPolicy.ALLKEYS_LRU || policy == EvictionPolicy.VOLATILE_LRU;
+        long used = usedMemoryBytes();
+        int evicted = 0;
+        while (used > maxMemoryBytes) {
+            Bytes victim = null;
+            long oldestLru = Long.MAX_VALUE;
+            for (Bytes k : volatileOnly ? expires.keySet() : map.keySet()) {
+                RedisObject obj = map.get(k);
+                if (obj == null) {
+                    continue;
+                }
+                if (!lru) {
+                    victim = k;
+                    break;
+                }
+                if (obj.lru() < oldestLru) {
+                    oldestLru = obj.lru();
+                    victim = k;
+                }
+            }
+            if (victim == null) {
+                break;
+            }
+            RedisObject removed = map.remove(victim);
+            expires.remove(victim);
+            if (removed != null) {
+                used -= MemoryEstimator.estimateEntry(victim, removed);
+                evicted++;
+            }
+        }
+        return evicted;
+    }
+
+    @Override
     public void flush() {
         map.clear();
         expires.clear();
