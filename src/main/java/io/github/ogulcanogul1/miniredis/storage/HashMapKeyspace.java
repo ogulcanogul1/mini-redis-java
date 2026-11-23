@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalLong;
 import java.util.function.Consumer;
 
 /** {@link Keyspace} on top of {@link HashMap} (Adım 1.3). Kept to run the contract tests on. */
@@ -36,6 +38,310 @@ final class HashMapKeyspace implements Keyspace {
         }
         obj.touch(now);
         return Optional.of(obj.asString());
+    }
+
+    @Override
+    public KeyspaceResult<Optional<Bytes>> getString(Bytes key) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj != null) {
+            obj.touch(now);
+        }
+        return KeyspaceSupport.readString(obj);
+    }
+
+    @Override
+    public KeyspaceResult<Integer> listPush(Bytes key, List<Bytes> values, boolean left) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(values, "values");
+        long now = clock.millis();
+        purgeIfExpired(key, now);
+        RedisObject existing = map.get(key);
+        RedisObject.ListObj listObj;
+        if (existing == null) {
+            listObj = RedisObject.list(now);
+            map.put(key, listObj);
+        } else if (existing instanceof RedisObject.ListObj lo) {
+            listObj = lo;
+            listObj.touch(now);
+        } else {
+            return KeyspaceResult.wrongType();
+        }
+        return KeyspaceResult.ok(KeyspaceSupport.pushList(listObj, values, left));
+    }
+
+    @Override
+    public KeyspaceResult<Optional<Bytes>> listPop(Bytes key, boolean left) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        if (!purgeIfExpired(key, now)) {
+            return KeyspaceResult.ok(Optional.empty());
+        }
+        if (!(map.get(key) instanceof RedisObject.ListObj listObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        listObj.touch(now);
+        Optional<Bytes> popped = KeyspaceSupport.popList(listObj, left);
+        if (listObj.deque().isEmpty()) {
+            map.remove(key);
+            expires.remove(key);
+        }
+        return KeyspaceResult.ok(popped);
+    }
+
+    @Override
+    public KeyspaceResult<List<Bytes>> listRange(Bytes key, long start, long stop) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(List.of());
+        }
+        if (!(obj instanceof RedisObject.ListObj listObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        listObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.rangeList(listObj, start, stop));
+    }
+
+    @Override
+    public KeyspaceResult<Integer> listLen(Bytes key) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(0);
+        }
+        if (!(obj instanceof RedisObject.ListObj listObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        listObj.touch(now);
+        return KeyspaceResult.ok(listObj.deque().size());
+    }
+
+    @Override
+    public KeyspaceResult<Integer> hashSet(Bytes key, List<Bytes> fieldsAndValues) {
+        Objects.requireNonNull(key, "key");
+        KeyspaceSupport.validateMsetPairs(fieldsAndValues);
+        long now = clock.millis();
+        purgeIfExpired(key, now);
+        RedisObject existing = map.get(key);
+        RedisObject.HashObj hashObj;
+        if (existing == null) {
+            hashObj = RedisObject.hash(now);
+            map.put(key, hashObj);
+        } else if (existing instanceof RedisObject.HashObj ho) {
+            hashObj = ho;
+            hashObj.touch(now);
+        } else {
+            return KeyspaceResult.wrongType();
+        }
+        return KeyspaceResult.ok(KeyspaceSupport.setHash(hashObj, fieldsAndValues));
+    }
+
+    @Override
+    public KeyspaceResult<Optional<Bytes>> hashGet(Bytes key, Bytes field) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(field, "field");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(Optional.empty());
+        }
+        if (!(obj instanceof RedisObject.HashObj hashObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        hashObj.touch(now);
+        return KeyspaceResult.ok(Optional.ofNullable(hashObj.map().get(field)));
+    }
+
+    @Override
+    public KeyspaceResult<Integer> hashDel(Bytes key, List<Bytes> fields) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(fields, "fields");
+        long now = clock.millis();
+        if (!purgeIfExpired(key, now)) {
+            return KeyspaceResult.ok(0);
+        }
+        if (!(map.get(key) instanceof RedisObject.HashObj hashObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        hashObj.touch(now);
+        int removed = KeyspaceSupport.delHash(hashObj, fields);
+        if (hashObj.map().isEmpty()) {
+            map.remove(key);
+            expires.remove(key);
+        }
+        return KeyspaceResult.ok(removed);
+    }
+
+    @Override
+    public KeyspaceResult<List<Bytes>> hashGetAll(Bytes key) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(List.of());
+        }
+        if (!(obj instanceof RedisObject.HashObj hashObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        hashObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.getAllHash(hashObj));
+    }
+
+    @Override
+    public KeyspaceResult<Integer> setAdd(Bytes key, List<Bytes> members) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(members, "members");
+        long now = clock.millis();
+        purgeIfExpired(key, now);
+        RedisObject existing = map.get(key);
+        RedisObject.SetObj setObj;
+        if (existing == null) {
+            setObj = RedisObject.set(now);
+            map.put(key, setObj);
+        } else if (existing instanceof RedisObject.SetObj so) {
+            setObj = so;
+            setObj.touch(now);
+        } else {
+            return KeyspaceResult.wrongType();
+        }
+        return KeyspaceResult.ok(KeyspaceSupport.addSet(setObj, members));
+    }
+
+    @Override
+    public KeyspaceResult<Integer> setRem(Bytes key, List<Bytes> members) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(members, "members");
+        long now = clock.millis();
+        if (!purgeIfExpired(key, now)) {
+            return KeyspaceResult.ok(0);
+        }
+        if (!(map.get(key) instanceof RedisObject.SetObj setObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        setObj.touch(now);
+        int removed = KeyspaceSupport.remSet(setObj, members);
+        if (setObj.members().isEmpty()) {
+            map.remove(key);
+            expires.remove(key);
+        }
+        return KeyspaceResult.ok(removed);
+    }
+
+    @Override
+    public KeyspaceResult<Boolean> setIsMember(Bytes key, Bytes member) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(member, "member");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(false);
+        }
+        if (!(obj instanceof RedisObject.SetObj setObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        setObj.touch(now);
+        return KeyspaceResult.ok(setObj.members().containsKey(member));
+    }
+
+    @Override
+    public KeyspaceResult<List<Bytes>> setMembers(Bytes key) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(List.of());
+        }
+        if (!(obj instanceof RedisObject.SetObj setObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        setObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.allSetMembers(setObj));
+    }
+
+    @Override
+    public KeyspaceResult<Integer> zadd(Bytes key, List<ZSetEntry> entries) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(entries, "entries");
+        long now = clock.millis();
+        purgeIfExpired(key, now);
+        RedisObject existing = map.get(key);
+        RedisObject.ZSetObj zsetObj;
+        if (existing == null) {
+            zsetObj = RedisObject.zset(now);
+            map.put(key, zsetObj);
+        } else if (existing instanceof RedisObject.ZSetObj zo) {
+            zsetObj = zo;
+            zsetObj.touch(now);
+        } else {
+            return KeyspaceResult.wrongType();
+        }
+        return KeyspaceResult.ok(KeyspaceSupport.addZSet(zsetObj, entries));
+    }
+
+    @Override
+    public KeyspaceResult<OptionalDouble> zscore(Bytes key, Bytes member) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(member, "member");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(OptionalDouble.empty());
+        }
+        if (!(obj instanceof RedisObject.ZSetObj zsetObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        zsetObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.scoreZSet(zsetObj, member));
+    }
+
+    @Override
+    public KeyspaceResult<List<ZSetEntry>> zrange(Bytes key, long start, long stop) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(List.of());
+        }
+        if (!(obj instanceof RedisObject.ZSetObj zsetObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        zsetObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.rangeZSet(zsetObj, start, stop));
+    }
+
+    @Override
+    public KeyspaceResult<List<ZSetEntry>> zrangeByScore(Bytes key, double min, double max) {
+        Objects.requireNonNull(key, "key");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(List.of());
+        }
+        if (!(obj instanceof RedisObject.ZSetObj zsetObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        zsetObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.rangeByScoreZSet(zsetObj, min, max));
+    }
+
+    @Override
+    public KeyspaceResult<OptionalLong> zrank(Bytes key, Bytes member) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(member, "member");
+        long now = clock.millis();
+        RedisObject obj = liveObject(key, now);
+        if (obj == null) {
+            return KeyspaceResult.ok(OptionalLong.empty());
+        }
+        if (!(obj instanceof RedisObject.ZSetObj zsetObj)) {
+            return KeyspaceResult.wrongType();
+        }
+        zsetObj.touch(now);
+        return KeyspaceResult.ok(KeyspaceSupport.rankZSet(zsetObj, member));
     }
 
     @Override

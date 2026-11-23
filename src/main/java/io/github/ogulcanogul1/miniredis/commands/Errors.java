@@ -16,6 +16,9 @@ final class Errors {
     static final Reply OVERFLOW = Reply.error("ERR increment or decrement would overflow");
     static final Reply DECREMENT_OVERFLOW = Reply.error("ERR decrement would overflow");
     static final Reply NO_SUCH_KEY = Reply.error("ERR no such key");
+    static final Reply WRONGTYPE = Reply.error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    static final Reply NOT_FLOAT = Reply.error("ERR value is not a valid float");
+    static final Reply MIN_MAX_NOT_FLOAT = Reply.error("ERR min or max is not a float");
 
     /** Redis shows at most this many bytes of the command name, and of all arguments together. */
     static final int MAX_SHOWN_BYTES = 128;

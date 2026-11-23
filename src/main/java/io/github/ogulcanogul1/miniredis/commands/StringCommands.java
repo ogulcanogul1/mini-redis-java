@@ -2,6 +2,7 @@ package io.github.ogulcanogul1.miniredis.commands;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.storage.IncrResult;
+import io.github.ogulcanogul1.miniredis.storage.KeyspaceResult;
 import io.github.ogulcanogul1.miniredis.storage.SetCondition;
 import io.github.ogulcanogul1.miniredis.util.Numbers;
 import java.util.List;
@@ -69,7 +70,10 @@ final class StringCommands {
 
     /** {@code GET key}: the value as a bulk string, or nil. */
     static Reply get(CommandContext ctx, List<Bytes> argv) {
-        return ctx.keyspace().get(argv.get(1)).map(Reply::bulk).orElse(Reply.NIL);
+        return switch (ctx.keyspace().getString(argv.get(1))) {
+            case KeyspaceResult.Ok(var opt) -> opt.map(Reply::bulk).orElse(Reply.NIL);
+            case KeyspaceResult.WrongType() -> Errors.WRONGTYPE;
+        };
     }
 
     /** {@code INCR key}: increments integer value by 1 (0 if absent). */

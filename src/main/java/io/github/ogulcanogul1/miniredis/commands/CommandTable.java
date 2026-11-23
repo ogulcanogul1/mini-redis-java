@@ -57,7 +57,13 @@ public final class CommandTable {
                 new CommandSpec("persist", 2, Set.of(Flag.WRITE), KeyCommands::persist),
                 new CommandSpec("keys", 2, Set.of(Flag.READONLY), KeyCommands::keys),
                 new CommandSpec("dbsize", 1, Set.of(Flag.READONLY), KeyCommands::dbsize),
-                new CommandSpec("flushdb", -1, Set.of(Flag.WRITE), KeyCommands::flushdb)));
+                new CommandSpec("flushdb", -1, Set.of(Flag.WRITE), KeyCommands::flushdb),
+                new CommandSpec("lpush", -3, Set.of(Flag.WRITE), ListCommands::lpush),
+                new CommandSpec("rpush", -3, Set.of(Flag.WRITE), ListCommands::rpush),
+                new CommandSpec("lpop", 2, Set.of(Flag.WRITE), ListCommands::lpop),
+                new CommandSpec("rpop", 2, Set.of(Flag.WRITE), ListCommands::rpop),
+                new CommandSpec("lrange", 4, Set.of(Flag.READONLY), ListCommands::lrange),
+                new CommandSpec("llen", 2, Set.of(Flag.READONLY), ListCommands::llen)));
     }
 
     /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */
