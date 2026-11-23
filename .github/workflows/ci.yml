@@ -7,6 +7,16 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:7.0.15
+        ports:
+          - 6390:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -15,8 +25,9 @@ jobs:
           java-version: '21'
           cache: maven
       # install = verify + copy the jar to the local Maven repo, so bench/ can build against it
-      - name: Build, format check, tests, coverage report
-        run: mvn -B install
+      # -Pcompat enables RedisCompatIT against the Redis 7.0.15 service container on port 6390
+      - name: Build, format check, tests, differential tests, coverage report
+        run: mvn -B install -Pcompat
       # Benchmarks are compiled and format-checked in CI, never run there (shared runners are noisy, K13)
       - name: Benchmarks compile
         run: mvn -B -f bench/pom.xml verify
