@@ -9,20 +9,6 @@ import java.util.Objects;
  * An immutable, binary-safe byte string. Used for keys and string values.
  *
  * <p>Every factory copies its input and {@link #toByteArray()} returns a copy, so no caller can
- * Dosya (yeni): src/main/java/io/github/ogulcanogul1/miniredis/ds/Bytes.java
- *
- * İçerik (tamamı):
- * package io.github.ogulcanogul1.miniredis.ds;
- *
- * import java.nio.charset.Charset;
- * import java.nio.charset.StandardCharsets;
- * import java.util.Arrays;
- * import java.util.Objects;
- *
- * /**
- * An immutable, binary-safe byte string. Used for keys and string values.
- *
- * <p>Every factory copies its input and {@link #toByteArray()} returns a copy, so no caller can
  * change a {@code Bytes} after it is created. {@link #equals}, {@link #hashCode} and {@link
  * #compareTo} look at the content. {@code compareTo} compares bytes as unsigned values, like {@code
  * memcmp} in Redis.
