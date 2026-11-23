@@ -5,7 +5,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+/** Finds the command for an argv, checks its arity and runs it. */
 public final class Dispatcher {
+
     private final CommandTable table;
     private final CommandContext ctx;
 
