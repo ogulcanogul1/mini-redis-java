@@ -20,20 +20,27 @@ public sealed interface Reply {
     /** {@code $-1}: the nil bulk string. */
     Reply NIL = new NullBulk();
 
-    /** A simple string: {@code +text}. {@code text} must not contain CR or LF. */
+    /**
+     * A simple string: {@code +text}.
+     *
+     * @throws IllegalArgumentException if {@code text} contains CR or LF: in RESP they would end the
+     *     line early and the client would read the rest as a new reply
+     */
     record SimpleString(String text) implements Reply {
         public SimpleString {
-            Objects.requireNonNull(text, "text");
+            requireSingleLine(text);
         }
     }
 
     /**
      * An error: {@code -message}. The message starts with the error code ({@code ERR}, later also
-     * {@code WRONGTYPE} or {@code OOM}). It must not contain CR or LF.
+     * {@code WRONGTYPE} or {@code OOM}).
+     *
+     * @throws IllegalArgumentException if {@code message} contains CR or LF
      */
     record ErrorReply(String message) implements Reply {
         public ErrorReply {
-            Objects.requireNonNull(message, "message");
+            requireSingleLine(message);
         }
     }
 
@@ -75,5 +82,12 @@ public sealed interface Reply {
 
     static Reply array(List<Reply> elements) {
         return new ArrayReply(elements);
+    }
+
+    private static void requireSingleLine(String s) {
+        Objects.requireNonNull(s);
+        if (s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("must not contain CR or LF");
+        }
     }
 }
