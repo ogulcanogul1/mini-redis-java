@@ -45,6 +45,7 @@ public final class Dispatcher {
         if (!spec.acceptsArgCount(argv.size())) {
             return Errors.wrongArity(spec.name());
         }
+        ctx.stats().recordCommand();
         try {
             return spec.handler().execute(ctx, argv);
         } catch (RuntimeException e) {
