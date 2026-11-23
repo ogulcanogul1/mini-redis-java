@@ -13,60 +13,116 @@ import java.util.function.Consumer;
  * <p>Keys and values are immutable {@link Bytes}, so a value returned by {@link #get} stays valid
  * after the call. Thread-safe implementations ({@link Keyspaces#inMemory()},
  * {@link Keyspaces#sharded}) also execute multi-key operations atomically under sorted shard locks
- * (K3). Every method throws {@link NullPointerException} for a {@code null} argument.
+ * (K3) and support lazy + active TTL expiration (K6, K8). Every method throws {@link
+ * NullPointerException} for a {@code null} argument.
  */
 public interface Keyspace {
 
-    /** Returns the value of {@code key}, or {@link Optional#empty()} if the key does not exist. */
+    /** Returns the value of {@code key}, or {@link Optional#empty()} if absent or expired. */
     Optional<Bytes> get(Bytes key);
 
-    /** Sets {@code key} to {@code value}, replacing any old value. */
+    /** Sets {@code key} to {@code value} unconditionally, clearing any existing TTL. */
     void set(Bytes key, Bytes value);
 
-    /** Deletes {@code key}. Returns {@code true} if it existed. */
+    /**
+     * Conditionally sets {@code key} to {@code value} with an optional relative TTL in milliseconds.
+     *
+     * @param ttlMillis {@code null} for no expiration (removes any old TTL), or a positive number
+     *     of milliseconds
+     * @return {@code true} if the key was written, {@code false} if {@code condition} was not met
+     * @throws IllegalArgumentException if {@code ttlMillis != null} and {@code ttlMillis <= 0} or
+     *     adding it to the current time overflows {@code long}
+     */
+    boolean set(Bytes key, Bytes value, SetCondition condition, Long ttlMillis);
+
+    /** Deletes {@code key} (if present and not expired). Returns {@code true} if it existed. */
     boolean delete(Bytes key);
 
-    /** Deletes every key in {@code keys} atomically, returning how many existed. */
+    /** Deletes every live key in {@code keys} atomically, returning how many existed. */
     long deleteAll(List<Bytes> keys);
 
-    /** Returns whether {@code key} exists. */
+    /** Returns whether {@code key} exists and has not expired. */
     boolean exists(Bytes key);
 
-    /** Counts how many entries in {@code keys} exist atomically (repeated keys count each time). */
+    /** Counts how many entries in {@code keys} are live atomically (repeated keys count each time). */
     long existsAll(List<Bytes> keys);
 
     /**
      * Atomically parses {@code key}'s value as a base-10 {@code long} (default {@code 0} when
-     * absent), adds {@code delta}, and stores the updated value on success.
+     * absent or expired), adds {@code delta}, and stores the updated value on success, preserving
+     * any existing TTL on a live key.
      */
     IncrResult incrBy(Bytes key, long delta);
 
-    /** Atomically reads values for all {@code keys} in order. */
+    /** Atomically reads values for all {@code keys} in order ({@link Optional#empty()} if expired). */
     List<Optional<Bytes>> mget(List<Bytes> keys);
 
     /**
-     * Atomically writes alternating key/value pairs ({@code k1, v1, k2, v2, ...}).
+     * Atomically writes alternating key/value pairs ({@code k1, v1, k2, v2, ...}), clearing any
+     * existing TTL on each written key.
      *
      * @throws IllegalArgumentException if {@code keysAndValues} has odd length
      */
     void mset(List<Bytes> keysAndValues);
 
     /**
-     * Atomically renames {@code source} to {@code target}, overwriting {@code target} if present.
+     * Atomically renames {@code source} to {@code target}, overwriting {@code target} if present
+     * and moving {@code source}'s TTL (if any) to {@code target}.
      *
-     * @return {@code true} if {@code source} existed, {@code false} otherwise
+     * @return {@code true} if {@code source} existed and was not expired, {@code false} otherwise
      */
     boolean rename(Bytes source, Bytes target);
 
-    /** Returns the number of keys. */
+    /**
+     * Sets a relative expiration of {@code ttlMillis} milliseconds on {@code key}. If {@code
+     * ttlMillis <= 0} and {@code key} is live, deletes it immediately and returns {@code true}.
+     *
+     * @return {@code true} if {@code key} existed and was not expired, {@code false} otherwise
+     * @throws IllegalArgumentException if {@code ttlMillis > 0} overflows {@code long} when added to
+     *     the current time
+     */
+    boolean expire(Bytes key, long ttlMillis);
+
+    /**
+     * Sets an absolute Unix epoch expiration timestamp (ms) on {@code key}. If {@code
+     * expireAtMillis <= now} and {@code key} is live, deletes it immediately and returns {@code
+     * true}.
+     *
+     * @return {@code true} if {@code key} existed and was not expired, {@code false} otherwise
+     */
+    boolean expireAt(Bytes key, long expireAtMillis);
+
+    /**
+     * Returns the remaining time-to-live in milliseconds: {@code -2} if {@code key} is absent or
+     * expired, {@code -1} if it has no expiration, or {@code >= 0} milliseconds otherwise.
+     */
+    long pttl(Bytes key);
+
+    /**
+     * Removes the expiration from {@code key} if present.
+     *
+     * @return {@code true} if {@code key} was live and had an expiration removed, {@code false}
+     *     otherwise
+     */
+    boolean persist(Bytes key);
+
+    /**
+     * Samples up to {@code sampleSizePerShard} expiring keys per shard (repeating on a shard when
+     * more than 25% of sampled keys are expired) until {@code timeBudgetNanos} elapses.
+     *
+     * @return total number of expired keys removed
+     */
+    int purgeExpiredSample(int sampleSizePerShard, long timeBudgetNanos);
+
+    /** Returns the number of keys (approximate under concurrent lazy expiration, K6). */
     int size();
 
-    /** Deletes every key. */
+    /** Deletes every key and expiration. */
     void flush();
 
     /**
-     * Calls {@code action} once for every key, in no defined order. {@code action} must not change
-     * this keyspace.
+     * Calls {@code action} once for every live key, in no defined order. {@code action} must not
+     * change this keyspace.
      */
     void forEachKey(Consumer<? super Bytes> action);
 }
