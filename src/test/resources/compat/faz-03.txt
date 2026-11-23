@@ -74,3 +74,21 @@ SEND_CLOSE 1 "ab"c\n
 
 --- bulk_unchecked_trailing_bytes
 SEND 1 *1\r\n$4\r\nPINGxx
+
+--- phase4_atomic_and_multikey
+SEND 1 *2\r\n$4\r\nINCR\r\n$1\r\nc\r\n
+SEND 1 *3\r\n$6\r\nINCRBY\r\n$1\r\nc\r\n$2\r\n10\r\n
+SEND 1 *2\r\n$4\r\nDECR\r\n$1\r\nc\r\n
+SEND 1 *3\r\n$6\r\nDECRBY\r\n$1\r\nc\r\n$2\r\n-2\r\n
+SEND 1 *3\r\n$3\r\nSET\r\n$3\r\nmax\r\n$19\r\n9223372036854775807\r\n
+SEND 1 *2\r\n$4\r\nINCR\r\n$3\r\nmax\r\n
+SEND 1 *3\r\n$3\r\nSET\r\n$3\r\nmin\r\n$20\r\n-9223372036854775808\r\n
+SEND 1 *2\r\n$4\r\nDECR\r\n$3\r\nmin\r\n
+SEND 1 *3\r\n$6\r\nDECRBY\r\n$1\r\nc\r\n$20\r\n-9223372036854775808\r\n
+SEND 1 *3\r\n$3\r\nSET\r\n$3\r\nbad\r\n$2\r\n01\r\n
+SEND 1 *2\r\n$4\r\nINCR\r\n$3\r\nbad\r\n
+SEND 1 *7\r\n$4\r\nMSET\r\n$1\r\na\r\n$1\r\n1\r\n$1\r\na\r\n$1\r\n2\r\n$1\r\nb\r\n$1\r\n3\r\n
+SEND 1 *4\r\n$4\r\nMGET\r\n$1\r\na\r\n$1\r\nb\r\n$7\r\nmissing\r\n
+SEND 1 *3\r\n$6\r\nRENAME\r\n$1\r\na\r\n$1\r\nz\r\n
+SEND 1 *2\r\n$3\r\nGET\r\n$1\r\nz\r\n
+SEND 1 *3\r\n$6\r\nRENAME\r\n$7\r\nmissing\r\n$1\r\nx\r\n
