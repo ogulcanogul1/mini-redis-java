@@ -27,6 +27,11 @@ final class Errors {
         return Reply.error("ERR wrong number of arguments for '" + name + "' command");
     }
 
+    /** {@code ERR invalid expire time in 'set' command}. */
+    static Reply invalidExpireTime(String name) {
+        return Reply.error("ERR invalid expire time in '" + name + "' command");
+    }
+
     /**
      * {@code ERR unknown command 'foo', with args beginning with: 'a' 'b' }. The name is shown as the
      * client sent it. Every argument is quoted and followed by a space, so the text ends with a
