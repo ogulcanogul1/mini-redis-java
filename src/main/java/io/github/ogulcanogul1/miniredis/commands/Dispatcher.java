@@ -4,9 +4,17 @@ import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/** Finds the command for an argv, checks its arity and runs it. */
+/**
+ * Finds the command for an argv, checks its arity and runs it. Unexpected {@link RuntimeException}s
+ * from a handler are caught here, logged at ERROR (without user data), and translated to a generic
+ * error reply (K12).
+ */
 public final class Dispatcher {
+
+    private static final Logger log = LoggerFactory.getLogger(Dispatcher.class);
 
     private final CommandTable table;
     private final CommandContext ctx;
@@ -20,8 +28,8 @@ public final class Dispatcher {
      * Runs {@code argv}.
      *
      * @param argv the command name followed by its arguments
-     * @return the command's reply, or an error reply for an unknown command or a wrong number of
-     *     arguments (texts as in Redis 7)
+     * @return the command's reply, or an error reply for an unknown command, a wrong number of
+     *     arguments, or an unexpected internal failure
      * @throws IllegalArgumentException if {@code argv} is empty (the parser never produces one)
      */
     public Reply dispatch(List<Bytes> argv) {
@@ -37,6 +45,11 @@ public final class Dispatcher {
         if (!spec.acceptsArgCount(argv.size())) {
             return Errors.wrongArity(spec.name());
         }
-        return spec.handler().execute(ctx, argv);
+        try {
+            return spec.handler().execute(ctx, argv);
+        } catch (RuntimeException e) {
+            log.error("unexpected error while executing command '{}'", spec.name(), e);
+            return Errors.INTERNAL_ERROR;
+        }
     }
 }

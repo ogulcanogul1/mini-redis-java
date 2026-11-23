@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ogulcanogul1.miniredis.commands.CommandContext;
 import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
+import io.github.ogulcanogul1.miniredis.ds.Bytes;
+import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -122,6 +124,21 @@ class RespSessionTest {
         byte[] out = small.onData(ascii("*1\r\n$5\r\n"), 0, 8);
         assertThat(out).isEqualTo(ascii("-ERR Protocol error: invalid bulk length\r\n"));
         assertThat(small.shouldClose()).isTrue();
+    }
+
+    @Test
+    void quitStopsPipelineAndMarksClosed() {
+        Keyspace ks = Keyspaces.inMemory();
+        RespSession s =
+                new RespSession(new Dispatcher(CommandTable.standard(), new CommandContext(ks)), RespLimits.defaults());
+        byte[] wire = ascii("PING\r\nQUIT\r\nSET afterquit 1\r\n");
+
+        assertThat(s.onData(wire, 0, wire.length)).isEqualTo(ascii("+PONG\r\n+OK\r\n"));
+        assertThat(s.shouldClose()).isTrue();
+        assertThat(ks.get(Bytes.ascii("afterquit"))).isEmpty();
+
+        byte[] more = ascii("PING\r\n");
+        assertThatThrownBy(() -> s.onData(more, 0, more.length)).isInstanceOf(IllegalStateException.class);
     }
 
     private byte[] send(String s) {
