@@ -17,6 +17,7 @@
 
         <mini-redis.version>0.1.0-SNAPSHOT</mini-redis.version>
         <jmh.version>1.37</jmh.version>
+        <hdrhistogram.version>2.2.2</hdrhistogram.version>
         <palantir-java-format.version>2.103.0</palantir-java-format.version>
     </properties>
 
@@ -30,6 +31,11 @@
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>${jmh.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>${hdrhistogram.version}</version>
         </dependency>
     </dependencies>
 
