@@ -1,13 +1,17 @@
 package io.github.ogulcanogul1.miniredis.commands;
 
-import static io.github.ogulcanogul1.miniredis.commands.CommandSpec.Flag.READONLY;
-import static io.github.ogulcanogul1.miniredis.commands.CommandSpec.Flag.WRITE;
-
+import io.github.ogulcanogul1.miniredis.commands.CommandSpec.Flag;
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 /** Looks commands up by name, case-insensitively. Immutable after construction. */
-public class CommandTable {
+public final class CommandTable {
+
     private final Map<Bytes, CommandSpec> byName;
 
     /**
@@ -28,14 +32,14 @@ public class CommandTable {
     /** Returns the table with every command of the current phase (K11). */
     public static CommandTable standard() {
         return new CommandTable(List.of(
-                new CommandSpec("ping", -1, Set.of(READONLY), ConnectionCommands::ping),
-                new CommandSpec("set", 3, Set.of(WRITE), StringCommands::set),
-                new CommandSpec("get", 2, Set.of(READONLY), StringCommands::get),
-                new CommandSpec("del", -2, Set.of(WRITE), KeyCommands::del),
-                new CommandSpec("exists", -2, Set.of(READONLY), KeyCommands::exists),
-                new CommandSpec("keys", 2, Set.of(READONLY), KeyCommands::keys),
-                new CommandSpec("dbsize", 1, Set.of(READONLY), KeyCommands::dbsize),
-                new CommandSpec("flushdb", -1, Set.of(WRITE), KeyCommands::flushdb)));
+                new CommandSpec("ping", -1, Set.of(Flag.READONLY), ConnectionCommands::ping),
+                new CommandSpec("set", 3, Set.of(Flag.WRITE), StringCommands::set),
+                new CommandSpec("get", 2, Set.of(Flag.READONLY), StringCommands::get),
+                new CommandSpec("del", -2, Set.of(Flag.WRITE), KeyCommands::del),
+                new CommandSpec("exists", -2, Set.of(Flag.READONLY), KeyCommands::exists),
+                new CommandSpec("keys", 2, Set.of(Flag.READONLY), KeyCommands::keys),
+                new CommandSpec("dbsize", 1, Set.of(Flag.READONLY), KeyCommands::dbsize),
+                new CommandSpec("flushdb", -1, Set.of(Flag.WRITE), KeyCommands::flushdb)));
     }
 
     /** Finds the command called {@code name}, ignoring ASCII case. */
