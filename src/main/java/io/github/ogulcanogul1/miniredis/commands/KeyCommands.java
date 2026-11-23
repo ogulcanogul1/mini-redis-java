@@ -1,38 +1,31 @@
 package io.github.ogulcanogul1.miniredis.commands;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
-import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.util.Glob;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Generic key commands: {@code DEL}, {@code EXISTS}, {@code KEYS}, {@code DBSIZE}, {@code FLUSHDB}. */
+/**
+ * Generic key commands: {@code DEL}, {@code EXISTS}, {@code KEYS}, {@code DBSIZE}, {@code FLUSHDB},
+ * {@code RENAME}.
+ */
 final class KeyCommands {
 
     private KeyCommands() {}
 
-    /** {@code DEL key [key ...]}: the number of keys deleted. A repeated key counts once. */
+    /** {@code DEL key [key ...]}: the number of keys deleted atomically. A repeated key counts once. */
     static Reply del(CommandContext ctx, List<Bytes> argv) {
-        Keyspace ks = ctx.keyspace();
-        long deleted = 0;
-        for (Bytes key : argv.subList(1, argv.size())) {
-            if (ks.delete(key)) {
-                deleted++; // the second "a" in DEL a a finds nothing, so it is not counted
-            }
-        }
-        return Reply.integer(deleted);
+        return Reply.integer(ctx.keyspace().deleteAll(argv.subList(1, argv.size())));
     }
 
-    /** {@code EXISTS key [key ...]}: how many of the given keys exist. A repeated key counts each time. */
+    /** {@code EXISTS key [key ...]}: how many of the given keys exist atomically. Repeated keys count each time. */
     static Reply exists(CommandContext ctx, List<Bytes> argv) {
-        Keyspace ks = ctx.keyspace();
-        long count = 0;
-        for (Bytes key : argv.subList(1, argv.size())) {
-            if (ks.exists(key)) {
-                count++;
-            }
-        }
-        return Reply.integer(count);
+        return Reply.integer(ctx.keyspace().existsAll(argv.subList(1, argv.size())));
+    }
+
+    /** {@code RENAME source target}: atomically renames {@code source} to {@code target}. */
+    static Reply rename(CommandContext ctx, List<Bytes> argv) {
+        return ctx.keyspace().rename(argv.get(1), argv.get(2)) ? Reply.OK : Errors.NO_SUCH_KEY;
     }
 
     /** {@code KEYS pattern}: every key that matches the glob pattern, in no defined order. */

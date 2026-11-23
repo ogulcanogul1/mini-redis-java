@@ -4,11 +4,17 @@ import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import java.util.Objects;
 
 /**
- * What a command may use while it runs. Faz 1 has only the keyspace. Later phases add fields here
- * (the clock in Faz 6, the client in Faz 3), so handler signatures stay the same.
+ * What a command may use while it runs (keyspace and shared {@link ServerStats}). Later phases add
+ * clock / persistence hooks without changing command handler signatures.
  */
-public record CommandContext(Keyspace keyspace) {
+public record CommandContext(Keyspace keyspace, ServerStats stats) {
+
     public CommandContext {
         Objects.requireNonNull(keyspace, "keyspace");
+        Objects.requireNonNull(stats, "stats");
+    }
+
+    public CommandContext(Keyspace keyspace) {
+        this(keyspace, new ServerStats());
     }
 }

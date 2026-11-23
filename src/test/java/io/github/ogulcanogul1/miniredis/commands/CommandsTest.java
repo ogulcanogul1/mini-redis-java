@@ -19,11 +19,13 @@ import org.slf4j.LoggerFactory;
 
 class CommandsTest {
 
+    private ServerStats stats;
     private Dispatcher dispatcher;
 
     @BeforeEach
     void setUp() {
-        dispatcher = new Dispatcher(CommandTable.standard(), new CommandContext(Keyspaces.inMemory()));
+        stats = new ServerStats();
+        dispatcher = new Dispatcher(CommandTable.standard(), new CommandContext(Keyspaces.inMemory(), stats));
     }
 
     @Test
@@ -231,6 +233,49 @@ class CommandsTest {
             logger.detachAppender(appender);
             appender.stop();
         }
+    }
+
+    @Test
+    void incrDecrIncrByDecrByFollowRedisSemanticsAndOverflowRules() {
+        assertThat(run("INCR", "n")).isEqualTo(Reply.integer(1));
+        assertThat(run("INCRBY", "n", "5")).isEqualTo(Reply.integer(6));
+        assertThat(run("DECR", "n")).isEqualTo(Reply.integer(5));
+        assertThat(run("DECRBY", "n", "2")).isEqualTo(Reply.integer(3));
+        assertThat(run("DECRBY", "n", "-4")).isEqualTo(Reply.integer(7));
+
+        run("SET", "max", Long.toString(Long.MAX_VALUE));
+        assertThat(run("INCR", "max")).isEqualTo(Reply.error("ERR increment or decrement would overflow"));
+
+        run("SET", "min", Long.toString(Long.MIN_VALUE));
+        assertThat(run("DECR", "min")).isEqualTo(Reply.error("ERR increment or decrement would overflow"));
+        assertThat(run("DECRBY", "n", Long.toString(Long.MIN_VALUE)))
+                .isEqualTo(Reply.error("ERR decrement would overflow"));
+
+        for (String bad : List.of("", " 1", "01", "abc", "+5")) {
+            run("SET", "bad", bad);
+            assertThat(run("INCR", "bad")).isEqualTo(Reply.error("ERR value is not an integer or out of range"));
+        }
+        assertThat(run("INCRBY", "n", "1.5")).isEqualTo(Reply.error("ERR value is not an integer or out of range"));
+        assertThat(run("INCR")).isEqualTo(Reply.error("ERR wrong number of arguments for 'incr' command"));
+        assertThat(stats.totalCommands()).isEqualTo(21);
+    }
+
+    @Test
+    void mgetMsetAndRenameHandleMultipleKeysAndArity() {
+        assertThat(run("MSET", "a", "1", "a", "2", "b", "3")).isEqualTo(Reply.OK);
+        assertThat(run("MGET", "a", "b", "missing"))
+                .isEqualTo(Reply.array(List.of(Reply.bulk(Bytes.ascii("2")), Reply.bulk(Bytes.ascii("3")), Reply.NIL)));
+        assertThat(run("MSET", "a")).isEqualTo(Reply.error("ERR wrong number of arguments for 'mset' command"));
+        assertThat(run("MSET", "a", "1", "b"))
+                .isEqualTo(Reply.error("ERR wrong number of arguments for 'mset' command"));
+        assertThat(run("MGET")).isEqualTo(Reply.error("ERR wrong number of arguments for 'mget' command"));
+
+        assertThat(run("RENAME", "a", "a")).isEqualTo(Reply.OK);
+        assertThat(run("RENAME", "a", "c")).isEqualTo(Reply.OK);
+        assertThat(run("GET", "a")).isEqualTo(Reply.NIL);
+        assertThat(run("GET", "c")).isEqualTo(Reply.bulk(Bytes.ascii("2")));
+        assertThat(run("RENAME", "missing", "x")).isEqualTo(Reply.error("ERR no such key"));
+        assertThat(run("RENAME", "a")).isEqualTo(Reply.error("ERR wrong number of arguments for 'rename' command"));
     }
 
     private Reply run(String... parts) {

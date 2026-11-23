@@ -12,6 +12,10 @@ final class Errors {
 
     static final Reply SYNTAX = Reply.error("ERR syntax error");
     static final Reply INTERNAL_ERROR = Reply.error("ERR internal error");
+    static final Reply NOT_INTEGER = Reply.error("ERR value is not an integer or out of range");
+    static final Reply OVERFLOW = Reply.error("ERR increment or decrement would overflow");
+    static final Reply DECREMENT_OVERFLOW = Reply.error("ERR decrement would overflow");
+    static final Reply NO_SUCH_KEY = Reply.error("ERR no such key");
 
     /** Redis shows at most this many bytes of the command name, and of all arguments together. */
     static final int MAX_SHOWN_BYTES = 128;
