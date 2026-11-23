@@ -80,6 +80,11 @@ public final class CommandTable {
                 new CommandSpec("save", 1, Set.of(), PersistenceCommands::save),
                 new CommandSpec("bgsave", 1, Set.of(), PersistenceCommands::bgsave),
                 new CommandSpec("info", -1, Set.of(Flag.READONLY), InfoCommand::info),
+                new CommandSpec("multi", 1, Set.of(), (ctx, argv) -> Reply.OK),
+                new CommandSpec("exec", 1, Set.of(), (ctx, argv) -> Reply.NULL_ARRAY),
+                new CommandSpec("discard", 1, Set.of(), (ctx, argv) -> Reply.OK),
+                new CommandSpec("watch", -2, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
+                new CommandSpec("unwatch", 1, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
                 new CommandSpec(
                         "auth",
                         2,
