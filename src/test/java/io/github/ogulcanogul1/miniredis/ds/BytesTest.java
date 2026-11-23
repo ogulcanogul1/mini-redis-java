@@ -121,4 +121,36 @@ class BytesTest {
 
         assertThat(b.decode(StandardCharsets.ISO_8859_1)).isEqualTo("ÿ\u0000");
     }
+
+    @Test
+    void ofRangeCopiesSliceAndHandlesEmptyAndFull() {
+        byte[] src = {'h', 'e', 'l', 'l', 'o'};
+
+        assertThat(Bytes.of(src, 1, 3)).isEqualTo(Bytes.utf8("ell"));
+        assertThat(Bytes.of(src, 0, 5)).isEqualTo(Bytes.utf8("hello"));
+        assertThat(Bytes.of(src, 5, 0)).isEqualTo(Bytes.EMPTY);
+        assertThat(Bytes.of(src, 0, 0)).isEqualTo(Bytes.EMPTY);
+    }
+
+    @Test
+    void changingSourceAfterOfRangeDoesNotChangeBytes() {
+        byte[] src = {'h', 'e', 'l', 'l', 'o'};
+        Bytes slice = Bytes.of(src, 1, 3);
+
+        src[2] = 'X';
+
+        assertThat(slice).isEqualTo(Bytes.utf8("ell"));
+    }
+
+    @Test
+    void ofRangeRejectsNullAndOutOfBoundsRanges() {
+        byte[] src = {'h', 'e', 'l', 'l', 'o'};
+
+        assertThatThrownBy(() -> Bytes.of(null, 0, 0)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> Bytes.of(src, -1, 2)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> Bytes.of(src, 0, -1)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> Bytes.of(src, 4, 2)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> Bytes.of(src, 6, 0)).isInstanceOf(IndexOutOfBoundsException.class);
+        assertThatThrownBy(() -> Bytes.of(src, Integer.MAX_VALUE, 2)).isInstanceOf(IndexOutOfBoundsException.class);
+    }
 }

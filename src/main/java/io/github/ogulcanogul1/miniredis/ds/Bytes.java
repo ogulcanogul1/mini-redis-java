@@ -125,4 +125,20 @@ public final class Bytes implements Comparable<Bytes> {
         }
         return sb.toString();
     }
+
+    /**
+     * Returns a {@code Bytes} holding a copy of {@code length} bytes of
+     * {@code src}, starting at
+     * {@code offset}. The RESP parser uses it to take an argument out of
+     * its read buffer with a single
+     * copy.
+     *
+     * @throws IndexOutOfBoundsException if the range is not inside {@code
+     * src}
+     */
+    public static Bytes of(byte[] src, int offset, int length) {
+        Objects.requireNonNull(src, "src");
+        Objects.checkFromIndexSize(offset, length, src.length);
+        return new Bytes(Arrays.copyOfRange(src, offset, offset + length));
+    }
 }
