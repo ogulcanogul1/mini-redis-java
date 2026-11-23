@@ -16,18 +16,22 @@ import org.junit.jupiter.api.io.TempDir;
 class ConfigParserTest {
 
     @Test
-    void defaultsUseLocalhost6380ThreadPoolNotice() {
+    void defaultsUseLocalhost6380MultiReactorNotice() {
         ServerConfig cfg = ServerConfig.defaults();
 
         assertThat(cfg.bind()).isEqualTo("127.0.0.1");
         assertThat(cfg.port()).isEqualTo(6380);
-        assertThat(cfg.ioModel()).isEqualTo(ServerConfig.IoModel.THREAD_POOL);
+        assertThat(cfg.ioModel()).isEqualTo(ServerConfig.IoModel.MULTI_REACTOR);
         assertThat(cfg.logLevel()).isEqualTo(ServerConfig.LogLevel.NOTICE);
         assertThat(cfg.respLimits()).isEqualTo(RespLimits.defaults());
         assertThat(cfg.workerThreads()).isEqualTo(8);
         assertThat(cfg.queueCapacity()).isEqualTo(256);
         assertThat(cfg.shards()).isEqualTo(16);
         assertThat(cfg.lockType()).isEqualTo(LockType.RWLOCK);
+        assertThat(cfg.ioThreads()).isEqualTo(4);
+        assertThat(cfg.maxClients()).isEqualTo(10_000);
+        assertThat(cfg.clientOutputBufferLimit()).isEqualTo(16L * 1024 * 1024);
+        assertThat(cfg.idleTimeoutSeconds()).isZero();
     }
 
     @Test
@@ -37,27 +41,39 @@ class ConfigParserTest {
                 "  # comment line",
                 "bind 0.0.0.0",
                 "port 6381",
-                "io-model thread-per-conn",
+                "io-model virtual",
                 "loglevel debug",
                 "proto-max-bulk-len 1048576",
                 "worker-threads 12",
                 "queue-capacity 64",
                 "shards 4",
-                "lock-type mutex"));
+                "lock-type mutex",
+                "io-threads 2",
+                "maxclients 500",
+                "client-output-buffer-limit 2097152",
+                "idle-timeout-seconds 30"));
 
         assertThat(cfg.bind()).isEqualTo("0.0.0.0");
         assertThat(cfg.port()).isEqualTo(6381);
-        assertThat(cfg.ioModel()).isEqualTo(ServerConfig.IoModel.THREAD_PER_CONN);
+        assertThat(cfg.ioModel()).isEqualTo(ServerConfig.IoModel.VIRTUAL);
         assertThat(cfg.logLevel()).isEqualTo(ServerConfig.LogLevel.DEBUG);
         assertThat(cfg.respLimits().maxBulkLength()).isEqualTo(1048576);
         assertThat(cfg.workerThreads()).isEqualTo(12);
         assertThat(cfg.queueCapacity()).isEqualTo(64);
         assertThat(cfg.shards()).isEqualTo(4);
         assertThat(cfg.lockType()).isEqualTo(LockType.MUTEX);
+        assertThat(cfg.ioThreads()).isEqualTo(2);
+        assertThat(cfg.maxClients()).isEqualTo(500);
+        assertThat(cfg.clientOutputBufferLimit()).isEqualTo(2_097_152L);
+        assertThat(cfg.idleTimeoutSeconds()).isEqualTo(30L);
         assertThat(ConfigParser.parseLines(List.of("io-model SINGLE")).ioModel())
                 .isEqualTo(ServerConfig.IoModel.SINGLE);
+        assertThat(ConfigParser.parseLines(List.of("io-model thread-per-conn")).ioModel())
+                .isEqualTo(ServerConfig.IoModel.THREAD_PER_CONN);
         assertThat(ConfigParser.parseLines(List.of("io-model thread-pool")).ioModel())
                 .isEqualTo(ServerConfig.IoModel.THREAD_POOL);
+        assertThat(ConfigParser.parseLines(List.of("io-model multi-reactor")).ioModel())
+                .isEqualTo(ServerConfig.IoModel.MULTI_REACTOR);
     }
 
     @Test
@@ -83,7 +99,7 @@ class ConfigParserTest {
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("port abc"))).isInstanceOf(ConfigException.class);
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("port -1"))).isInstanceOf(ConfigException.class);
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("port 65536"))).isInstanceOf(ConfigException.class);
-        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("io-model virtual")))
+        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("io-model invalid")))
                 .isInstanceOf(ConfigException.class);
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("loglevel trace")))
                 .isInstanceOf(ConfigException.class);
@@ -105,6 +121,14 @@ class ConfigParserTest {
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("queue-capacity 0")))
                 .isInstanceOf(ConfigException.class);
         assertThatThrownBy(() -> ConfigParser.parseLines(List.of("lock-type spin")))
+                .isInstanceOf(ConfigException.class);
+        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("io-threads 0")))
+                .isInstanceOf(ConfigException.class);
+        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("maxclients 0")))
+                .isInstanceOf(ConfigException.class);
+        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("client-output-buffer-limit 0")))
+                .isInstanceOf(ConfigException.class);
+        assertThatThrownBy(() -> ConfigParser.parseLines(List.of("idle-timeout-seconds -1")))
                 .isInstanceOf(ConfigException.class);
     }
 }

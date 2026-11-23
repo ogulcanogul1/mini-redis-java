@@ -87,6 +87,10 @@ public final class ConfigParser {
         private int queueCapacity;
         private int shards;
         private LockType lockType;
+        private int ioThreads;
+        private int maxClients;
+        private long clientOutputBufferLimit;
+        private long idleTimeoutSeconds;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -98,6 +102,10 @@ public final class ConfigParser {
             this.queueCapacity = base.queueCapacity();
             this.shards = base.shards();
             this.lockType = base.lockType();
+            this.ioThreads = base.ioThreads();
+            this.maxClients = base.maxClients();
+            this.clientOutputBufferLimit = base.clientOutputBufferLimit();
+            this.idleTimeoutSeconds = base.idleTimeoutSeconds();
         }
 
         void apply(String rawKey, String value) {
@@ -115,6 +123,8 @@ public final class ConfigParser {
                         case "single" -> ServerConfig.IoModel.SINGLE;
                         case "thread-per-conn" -> ServerConfig.IoModel.THREAD_PER_CONN;
                         case "thread-pool" -> ServerConfig.IoModel.THREAD_POOL;
+                        case "virtual" -> ServerConfig.IoModel.VIRTUAL;
+                        case "multi-reactor" -> ServerConfig.IoModel.MULTI_REACTOR;
                         default -> throw new ConfigException("unsupported io-model: " + value);
                     };
                 case "loglevel" ->
@@ -143,13 +153,29 @@ public final class ConfigParser {
                         case "rwlock" -> LockType.RWLOCK;
                         default -> throw new ConfigException("invalid lock-type: " + value);
                     };
+                case "io-threads" -> this.ioThreads = parseInt(key, value);
+                case "maxclients" -> this.maxClients = parseInt(key, value);
+                case "client-output-buffer-limit" -> this.clientOutputBufferLimit = parseLong(key, value);
+                case "idle-timeout-seconds" -> this.idleTimeoutSeconds = parseLong(key, value);
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
 
         ServerConfig build() {
             return new ServerConfig(
-                    bind, port, ioModel, logLevel, respLimits, workerThreads, queueCapacity, shards, lockType);
+                    bind,
+                    port,
+                    ioModel,
+                    logLevel,
+                    respLimits,
+                    workerThreads,
+                    queueCapacity,
+                    shards,
+                    lockType,
+                    ioThreads,
+                    maxClients,
+                    clientOutputBufferLimit,
+                    idleTimeoutSeconds);
         }
 
         private static int parseInt(String key, String value) {
@@ -157,6 +183,14 @@ public final class ConfigParser {
                 return Integer.parseInt(value);
             } catch (NumberFormatException e) {
                 throw new ConfigException("invalid integer for '" + key + "': " + value, e);
+            }
+        }
+
+        private static long parseLong(String key, String value) {
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException e) {
+                throw new ConfigException("invalid long for '" + key + "': " + value, e);
             }
         }
     }

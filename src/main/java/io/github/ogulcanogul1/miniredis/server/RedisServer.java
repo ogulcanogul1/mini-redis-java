@@ -5,12 +5,15 @@ import io.github.ogulcanogul1.miniredis.commands.CommandContext;
 import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
 import io.github.ogulcanogul1.miniredis.commands.ServerStats;
+import io.github.ogulcanogul1.miniredis.net.MultiReactorServer;
 import io.github.ogulcanogul1.miniredis.net.ServerBackend;
 import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPerConnServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
+import io.github.ogulcanogul1.miniredis.net.VirtualThreadServer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
+import io.github.ogulcanogul1.miniredis.util.Clock;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -22,8 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Composition root (PLAN §2.3): wires sharded storage, stats, commands, protocol session, and the
- * configured network backend, and owns server lifecycle logging.
+ * Composition root (PLAN §2.3): wires sharded storage, stats, commands, protocol session, clock, and
+ * the configured network backend, and owns server lifecycle logging.
  */
 public final class RedisServer implements AutoCloseable {
 
@@ -43,6 +46,7 @@ public final class RedisServer implements AutoCloseable {
         this.config = Objects.requireNonNull(config, "config");
         Objects.requireNonNull(table, "table");
         this.stats = new ServerStats();
+        Clock clock = Clock.system();
         Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType());
         Dispatcher dispatcher = new Dispatcher(table, new CommandContext(keyspace, stats));
         this.backend = switch (config.ioModel()) {
@@ -57,6 +61,21 @@ public final class RedisServer implements AutoCloseable {
                         config.respLimits(),
                         config.workerThreads(),
                         config.queueCapacity(),
+                        stats);
+            case VIRTUAL ->
+                new VirtualThreadServer(
+                        config.bind(), config.port(), dispatcher, config.respLimits(), config.maxClients(), stats);
+            case MULTI_REACTOR ->
+                new MultiReactorServer(
+                        config.bind(),
+                        config.port(),
+                        dispatcher,
+                        config.respLimits(),
+                        config.ioThreads(),
+                        config.maxClients(),
+                        config.clientOutputBufferLimit(),
+                        config.idleTimeoutSeconds(),
+                        clock,
                         stats);
         };
     }
