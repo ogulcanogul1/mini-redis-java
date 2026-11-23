@@ -3,6 +3,7 @@ package io.github.ogulcanogul1.miniredis.protocol;
 import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
 import io.github.ogulcanogul1.miniredis.commands.Reply;
+import io.github.ogulcanogul1.miniredis.commands.SessionAuthState;
 import java.io.ByteArrayOutputStream;
 import java.util.Objects;
 
@@ -19,11 +20,17 @@ public final class RespSession {
 
     private final RespParser parser;
     private final Dispatcher dispatcher;
+    private final SessionAuthState authState;
     private boolean closed;
 
     public RespSession(Dispatcher dispatcher, RespLimits limits) {
+        this(dispatcher, limits, true);
+    }
+
+    public RespSession(Dispatcher dispatcher, RespLimits limits, boolean loopback) {
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
         this.parser = new RespParser(Objects.requireNonNull(limits, "limits"));
+        this.authState = dispatcher.newSessionState(loopback);
     }
 
     /**
@@ -42,7 +49,7 @@ public final class RespSession {
         while (true) {
             switch (parser.next()) {
                 case ParseResult.Command command -> {
-                    RespWriter.writeTo(dispatcher.dispatch(command.argv()), out);
+                    RespWriter.writeTo(dispatcher.dispatch(command.argv(), authState), out);
                     if (CommandTable.isQuit(command.argv())) {
                         closed = true;
                         return out.toByteArray();

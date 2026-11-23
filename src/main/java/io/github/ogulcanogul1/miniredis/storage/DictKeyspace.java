@@ -2,6 +2,7 @@ package io.github.ogulcanogul1.miniredis.storage;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.ds.Dict;
+import io.github.ogulcanogul1.miniredis.ds.Hasher;
 import io.github.ogulcanogul1.miniredis.util.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,8 +16,9 @@ import java.util.function.Consumer;
 /** {@link Keyspace} on top of our own {@link Dict} (Adım 1.4, updated with TTL in Faz 6). */
 final class DictKeyspace implements Keyspace {
 
-    private final Dict<Bytes, RedisObject> dict = new Dict<>();
-    private final Dict<Bytes, Long> expires = new Dict<>();
+    private final Hasher<Bytes> hasher = Hasher.sipHash();
+    private final Dict<Bytes, RedisObject> dict = new Dict<>(hasher);
+    private final Dict<Bytes, Long> expires = new Dict<>(hasher);
     private final Clock clock;
 
     DictKeyspace() {

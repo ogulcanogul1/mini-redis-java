@@ -43,7 +43,9 @@ public record ServerConfig(
         AofFsyncPolicy appendFsync,
         long maxMemoryBytes,
         EvictionPolicy maxMemoryPolicy,
-        String dbFilename) {
+        String dbFilename,
+        String requirePass,
+        boolean protectedMode) {
 
     /** Localhost only: safe default. */
     public static final String DEFAULT_BIND = "127.0.0.1";
@@ -65,6 +67,8 @@ public record ServerConfig(
     public static final long DEFAULT_MAX_MEMORY_BYTES = 0L;
     public static final EvictionPolicy DEFAULT_MAX_MEMORY_POLICY = EvictionPolicy.NOEVICTION;
     public static final String DEFAULT_DB_FILENAME = "dump.rdb";
+    public static final String DEFAULT_REQUIRE_PASS = null;
+    public static final boolean DEFAULT_PROTECTED_MODE = true;
 
     /** Supported I/O backend models (K2). */
     public enum IoModel {
@@ -125,6 +129,9 @@ public record ServerConfig(
         Objects.requireNonNull(maxMemoryPolicy, "maxMemoryPolicy");
         if (dbFilename == null || dbFilename.isBlank()) {
             throw new ConfigException("dbfilename must not be blank");
+        }
+        if (requirePass != null && requirePass.isEmpty()) {
+            requirePass = null;
         }
     }
 
@@ -282,7 +289,54 @@ public record ServerConfig(
                 appendFsync,
                 maxMemoryBytes,
                 maxMemoryPolicy,
-                DEFAULT_DB_FILENAME);
+                DEFAULT_DB_FILENAME,
+                DEFAULT_REQUIRE_PASS,
+                DEFAULT_PROTECTED_MODE);
+    }
+
+    /** Backward-compatible 19-argument constructor using default {@code requirePass=null} and {@code protectedMode=true}. */
+    public ServerConfig(
+            String bind,
+            int port,
+            IoModel ioModel,
+            LogLevel logLevel,
+            RespLimits respLimits,
+            int workerThreads,
+            int queueCapacity,
+            int shards,
+            LockType lockType,
+            int ioThreads,
+            int maxClients,
+            long clientOutputBufferLimit,
+            long idleTimeoutSeconds,
+            boolean appendOnly,
+            String appendFilename,
+            AofFsyncPolicy appendFsync,
+            long maxMemoryBytes,
+            EvictionPolicy maxMemoryPolicy,
+            String dbFilename) {
+        this(
+                bind,
+                port,
+                ioModel,
+                logLevel,
+                respLimits,
+                workerThreads,
+                queueCapacity,
+                shards,
+                lockType,
+                ioThreads,
+                maxClients,
+                clientOutputBufferLimit,
+                idleTimeoutSeconds,
+                appendOnly,
+                appendFilename,
+                appendFsync,
+                maxMemoryBytes,
+                maxMemoryPolicy,
+                dbFilename,
+                DEFAULT_REQUIRE_PASS,
+                DEFAULT_PROTECTED_MODE);
     }
 
     /** Returns the default configuration ({@code 127.0.0.1:6380}, {@code multi-reactor}, {@code 4} I/O threads, {@code 16} rwlock shards). */
@@ -311,6 +365,8 @@ public record ServerConfig(
                 DEFAULT_APPEND_FSYNC,
                 DEFAULT_MAX_MEMORY_BYTES,
                 DEFAULT_MAX_MEMORY_POLICY,
-                DEFAULT_DB_FILENAME);
+                DEFAULT_DB_FILENAME,
+                DEFAULT_REQUIRE_PASS,
+                DEFAULT_PROTECTED_MODE);
     }
 }

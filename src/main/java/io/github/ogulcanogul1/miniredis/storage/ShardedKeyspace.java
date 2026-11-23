@@ -30,7 +30,7 @@ final class ShardedKeyspace implements Keyspace {
 
     private final Shard[] shards;
     private final int mask;
-    private final Hasher<Bytes> hasher = Hasher.standard();
+    private final Hasher<Bytes> hasher = Hasher.sipHash();
     private final Clock clock;
 
     ShardedKeyspace(int shardCount, LockType lockType) {
@@ -45,7 +45,7 @@ final class ShardedKeyspace implements Keyspace {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.shards = new Shard[shardCount];
         for (int i = 0; i < shardCount; i++) {
-            this.shards[i] = new Shard(lockType);
+            this.shards[i] = new Shard(lockType, hasher);
         }
         this.mask = shardCount - 1;
     }
@@ -1010,12 +1010,14 @@ final class ShardedKeyspace implements Keyspace {
     }
 
     private static final class Shard {
-        private final Dict<Bytes, RedisObject> dict = new Dict<>();
-        private final Dict<Bytes, Long> expires = new Dict<>();
+        private final Dict<Bytes, RedisObject> dict;
+        private final Dict<Bytes, Long> expires;
         private final Lock readLock;
         private final Lock writeLock;
 
-        Shard(LockType lockType) {
+        Shard(LockType lockType, Hasher<Bytes> hasher) {
+            this.dict = new Dict<>(hasher);
+            this.expires = new Dict<>(hasher);
             if (lockType == LockType.MUTEX) {
                 ReentrantLock mutex = new ReentrantLock();
                 this.readLock = mutex;

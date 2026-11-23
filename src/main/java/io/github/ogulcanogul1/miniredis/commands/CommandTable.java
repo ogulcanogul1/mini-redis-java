@@ -78,7 +78,13 @@ public final class CommandTable {
                 new CommandSpec("zrangebyscore", -4, Set.of(Flag.READONLY), ZSetCommands::zrangeByScore),
                 new CommandSpec("zrank", 3, Set.of(Flag.READONLY), ZSetCommands::zrank),
                 new CommandSpec("save", 1, Set.of(), PersistenceCommands::save),
-                new CommandSpec("bgsave", 1, Set.of(), PersistenceCommands::bgsave)));
+                new CommandSpec("bgsave", 1, Set.of(), PersistenceCommands::bgsave),
+                new CommandSpec("info", -1, Set.of(Flag.READONLY), InfoCommand::info),
+                new CommandSpec(
+                        "auth",
+                        2,
+                        Set.of(),
+                        (ctx, argv) -> new Reply.ErrorReply("ERR Client sent AUTH, but no password is set"))));
     }
 
     /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */

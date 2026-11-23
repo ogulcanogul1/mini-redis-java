@@ -53,7 +53,13 @@ final class NioConnection {
         this.clientId = clientId;
         this.channel = Objects.requireNonNull(channel, "channel");
         this.key = Objects.requireNonNull(key, "key");
-        this.session = new RespSession(dispatcher, limits);
+        boolean loopback;
+        try {
+            loopback = ClientSessionLoop.isLoopback(channel.getRemoteAddress());
+        } catch (IOException e) {
+            loopback = true;
+        }
+        this.session = new RespSession(dispatcher, limits, loopback);
         this.maxOutputBytes = maxOutputBytes;
         this.stats = Objects.requireNonNull(stats, "stats");
         this.clock = Objects.requireNonNull(clock, "clock");
