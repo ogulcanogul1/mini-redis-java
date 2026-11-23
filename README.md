@@ -2,21 +2,29 @@
 
 [![CI](https://github.com/ogulcanogul1/mini-redis-java/actions/workflows/ci.yml/badge.svg)](https://github.com/ogulcanogul1/mini-redis-java/actions/workflows/ci.yml)
 
-A Redis-compatible in-memory key-value store written from scratch in Java 21, as a learning project.
+A Redis-compatible, multithreaded, persistent in-memory key-value store written from scratch in Java 21 (Maven, zero frameworks), as a systems-engineering learning project.
 
-> **Status:** Phase 5 complete (Java 21 `VirtualThreadServer`, non-blocking NIO `Selector` + `NioConnection` + `MultiReactorServer` with `io-threads=4` default, `Clock` abstraction (K8), output-buffer backpressure & idle timeout, `C10kStressTest` 1,000 concurrent connections, and open-loop `HdrHistogram` load generator; TTL expiration and AOF persistence arrive next for v1.0).
+> **Status:** Complete through **Phase 10.4** — custom `Dict` with SipHash-2-4, RESP2 parser/writer, 5 selectable I/O models (`multi-reactor` default), sharded lock-ordered storage, TTL + approximate LRU eviction (`--maxmemory`), Lists/Hashes/Sets/Sorted Sets (`SkipList`), AOF + RDB snapshot persistence (`SAVE`/`BGSAVE`), `INFO`/`AUTH`/`protected-mode`, Transactions (`MULTI`/`EXEC`/`WATCH`), Pub/Sub, Cluster hash slots, and Master-Replica replication (`--replicaof`).
 
 ## Requirements
 
-- JDK 21 (the build refuses any other major version)
+- JDK 21 (Maven Enforcer refuses any other major version)
 - Maven 3.9 or newer
-- Docker (optional, for the differential compatibility suite `-Pcompat` and running via container)
+- Docker (optional, for the differential compatibility suite `-Pcompat` and container runs)
 
 ## Supported Commands
 
-- Connection: `PING [message]`, `ECHO message`, `QUIT`
-- Strings & Atomic Counters: `SET key value`, `GET key`, `INCR key`, `DECR key`, `INCRBY key increment`, `DECRBY key decrement`, `MGET key [key ...]`, `MSET key value [key value ...]`
-- Keys: `DEL key [key ...]`, `EXISTS key [key ...]`, `RENAME source target`, `KEYS pattern`, `DBSIZE`, `FLUSHDB`
+- **Connection & Security:** `PING [message]`, `ECHO message`, `AUTH password`, `INFO [section]`, `QUIT`
+- **Strings & Atomic Counters:** `SET key value [EX sec | PX ms | EXAT ts | PXAT ts] [NX | XX]`, `GET key`, `INCR key`, `DECR key`, `INCRBY key increment`, `DECRBY key decrement`, `MGET key [key ...]`, `MSET key value [key value ...]`
+- **Keys & TTL:** `DEL key [key ...]`, `UNLINK key [key ...]`, `EXISTS key [key ...]`, `RENAME source target`, `KEYS pattern`, `DBSIZE`, `FLUSHDB`, `EXPIRE key sec`, `PEXPIRE key ms`, `PEXPIREAT key ts`, `TTL key`, `PTTL key`, `PERSIST key`
+- **Lists:** `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`, `LLEN`
+- **Hashes:** `HSET`, `HGET`, `HDEL`, `HGETALL`
+- **Sets:** `SADD`, `SREM`, `SISMEMBER`, `SMEMBERS`
+- **Sorted Sets (`SkipList` + `Dict`):** `ZADD`, `ZSCORE`, `ZRANGE`, `ZRANGEBYSCORE`, `ZRANK`
+- **Persistence:** `SAVE`, `BGSAVE`
+- **Transactions:** `MULTI`, `EXEC`, `DISCARD`, `WATCH`, `UNWATCH`
+- **Pub/Sub:** `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`
+- **Cluster & Replication:** `CLUSTER KEYSLOT`, `CLUSTER INFO`, `REPLCONF`, `PSYNC`, `ROLE`
 
 ## Build & Test
 
@@ -62,6 +70,11 @@ Configuration can be supplied via a Redis-style config file (`key value` lines) 
 - `--client-output-buffer-limit <bytes>` (default `16777216`), `--idle-timeout-seconds <sec>` (default `0`, disabled)
 - `--worker-threads <n>` (default `8`), `--queue-capacity <n>` (default `256`)
 - `--shards <power-of-two>` (default `16`), `--lock-type <rwlock|mutex>` (default `rwlock`)
+- `--maxmemory <bytes>` (default `0`, unlimited), `--maxmemory-policy <noeviction|allkeys-lru|volatile-lru|allkeys-random|volatile-random>` (default `noeviction`)
+- `--appendonly <yes|no>` (default `no`), `--appendfilename <path>` (default `appendonly.aof`), `--appendfsync <always|everysec|no>` (default `everysec`)
+- `--dbfilename <path>` (default `dump.rdb`)
+- `--requirepass <password>` (default unset), `--protected-mode <yes|no>` (default `yes`)
+- `--replicaof <host> <port>` (default unset; starts server as a read-only replica)
 - `--loglevel <debug|verbose|notice|warning>` (default `notice`), `--proto-max-bulk-len <bytes>` (default `536870912`)
 
 On Windows PowerShell/CMD use `;` instead of `:` in `-cp`: `"target/classes;target/lib/*"`.
@@ -80,7 +93,7 @@ Or build and run with Docker:
 
 ```bash
 docker build -t mini-redis .
-docker run --rm -p 6380:6380 mini-redis --bind 0.0.0.0 --port 6380
+docker run --rm -p 6380:6380 mini-redis --bind 0.0.0.0 --port 6380 --protected-mode no
 ```
 
 Test with `redis-cli`:
@@ -114,11 +127,8 @@ Sharded storage uses ascending shard-index lock ordering (`ShardedKeyspace`, K3)
 
 1. **Requests containing NUL (`\0`) bytes:** Redis uses C strings on inline/error paths and truncates or stalls on `\0`. `mini-redis` stays strictly binary-safe end-to-end.
 2. **`KEYS` character ranges crossing `0x7F`/`0x80` (e.g. `[\x01-\x80]`):** Redis compares range bounds as signed `char` on x86 (platform-dependent; on x86 `0x80` becomes `-128`). `mini-redis` compares byte values unsigned across all platforms, consistent with `memcmp` byte order.
+3. **Custom RDB snapshot format (`MINIRDB\0`):** `SAVE`/`BGSAVE` use `mini-redis`'s own big-endian binary snapshot format with trailing `CRC32` rather than Redis's LZF-compressed RDB format.
 
 ## Notes
 
 Not affiliated with Redis Ltd. This is an educational project. "Redis" is a trademark of Redis Ltd.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
