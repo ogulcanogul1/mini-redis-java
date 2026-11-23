@@ -63,7 +63,15 @@ public final class CommandTable {
                 new CommandSpec("lpop", 2, Set.of(Flag.WRITE), ListCommands::lpop),
                 new CommandSpec("rpop", 2, Set.of(Flag.WRITE), ListCommands::rpop),
                 new CommandSpec("lrange", 4, Set.of(Flag.READONLY), ListCommands::lrange),
-                new CommandSpec("llen", 2, Set.of(Flag.READONLY), ListCommands::llen)));
+                new CommandSpec("llen", 2, Set.of(Flag.READONLY), ListCommands::llen),
+                new CommandSpec("hset", -4, Set.of(Flag.WRITE), HashCommands::hset),
+                new CommandSpec("hget", 3, Set.of(Flag.READONLY), HashCommands::hget),
+                new CommandSpec("hdel", -3, Set.of(Flag.WRITE), HashCommands::hdel),
+                new CommandSpec("hgetall", 2, Set.of(Flag.READONLY), HashCommands::hgetall),
+                new CommandSpec("sadd", -3, Set.of(Flag.WRITE), SetCommands::sadd),
+                new CommandSpec("srem", -3, Set.of(Flag.WRITE), SetCommands::srem),
+                new CommandSpec("sismember", 3, Set.of(Flag.READONLY), SetCommands::sismember),
+                new CommandSpec("smembers", 2, Set.of(Flag.READONLY), SetCommands::smembers)));
     }
 
     /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */
