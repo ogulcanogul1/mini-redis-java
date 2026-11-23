@@ -3,12 +3,19 @@ package io.github.ogulcanogul1.miniredis.commands;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import io.github.ogulcanogul1.miniredis.commands.CommandSpec.Flag;
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class CommandsTest {
 
@@ -182,6 +189,48 @@ class CommandsTest {
 
         Reply withNull = dispatcher.dispatch(List.of(Bytes.utf8("FOO"), Bytes.of(new byte[] {'a', 0, 'b'})));
         assertThat(withNull).isEqualTo(Reply.error("ERR unknown command 'FOO', with args beginning with: 'a\u0000b' "));
+    }
+
+    @Test
+    void echoReturnsArgumentAsBulkStringAndChecksArity() {
+        assertThat(run("ECHO", "hello")).isEqualTo(Reply.bulk(Bytes.utf8("hello")));
+        assertThat(run("ECHO")).isEqualTo(Reply.error("ERR wrong number of arguments for 'echo' command"));
+        assertThat(run("ECHO", "a", "b")).isEqualTo(Reply.error("ERR wrong number of arguments for 'echo' command"));
+    }
+
+    @Test
+    void quitReturnsOkEvenWithExtraArguments() {
+        assertThat(run("QUIT")).isEqualTo(Reply.OK);
+        assertThat(run("quit", "extra")).isEqualTo(Reply.OK);
+        assertThat(CommandTable.isQuit(List.of(Bytes.ascii("QuIt")))).isTrue();
+    }
+
+    @Test
+    void dispatcherCatchesUnexpectedRuntimeExceptionAndLogsWithoutUserData() {
+        CommandSpec boom = new CommandSpec("boom", 2, Set.of(Flag.READONLY), (ctx, argv) -> {
+            throw new IllegalStateException("bug");
+        });
+        CommandTable table = new CommandTable(
+                List.of(boom, new CommandSpec("ping", -1, Set.of(Flag.READONLY), (ctx, argv) -> Reply.PONG)));
+        Dispatcher d = new Dispatcher(table, new CommandContext(Keyspaces.inMemory()));
+
+        Logger logger = (Logger) LoggerFactory.getLogger(Dispatcher.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThat(d.dispatch(List.of(Bytes.ascii("BOOM"), Bytes.ascii("secret-val"))))
+                    .isEqualTo(Reply.error("ERR internal error"));
+            assertThat(d.dispatch(List.of(Bytes.ascii("PING")))).isEqualTo(Reply.PONG);
+            assertThat(appender.list).anySatisfy(e -> {
+                assertThat(e.getLevel()).isEqualTo(Level.ERROR);
+                assertThat(e.getFormattedMessage()).contains("boom").doesNotContain("secret-val");
+                assertThat(e.getThrowableProxy()).isNotNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private Reply run(String... parts) {

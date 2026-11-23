@@ -11,6 +11,7 @@ import java.util.List;
 final class Errors {
 
     static final Reply SYNTAX = Reply.error("ERR syntax error");
+    static final Reply INTERNAL_ERROR = Reply.error("ERR internal error");
 
     /** Redis shows at most this many bytes of the command name, and of all arguments together. */
     static final int MAX_SHOWN_BYTES = 128;

@@ -1,5 +1,6 @@
 package io.github.ogulcanogul1.miniredis.protocol;
 
+import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
 import io.github.ogulcanogul1.miniredis.commands.Reply;
 import java.io.ByteArrayOutputStream;
@@ -10,9 +11,9 @@ import java.util.Objects;
  * socket; until then tests drive it directly. Not thread-safe: one session per connection.
  *
  * <p>Pipelining: a single {@link #onData} call may carry several requests, or the end of one and
- * the start of the next. Replies come out in request order. After a protocol error the session
- * writes the error, stops, and {@link #shouldClose()} turns {@code true}: Redis closes the
- * connection, because after bad framing it cannot know where the next request starts.
+ * the start of the next. Replies come out in request order. After a protocol error or a {@code
+ * QUIT} command, the session writes the reply, stops, and {@link #shouldClose()} turns {@code
+ * true}: Redis closes the connection immediately.
  */
 public final class RespSession {
 
@@ -40,7 +41,13 @@ public final class RespSession {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         while (true) {
             switch (parser.next()) {
-                case ParseResult.Command command -> RespWriter.writeTo(dispatcher.dispatch(command.argv()), out);
+                case ParseResult.Command command -> {
+                    RespWriter.writeTo(dispatcher.dispatch(command.argv()), out);
+                    if (CommandTable.isQuit(command.argv())) {
+                        closed = true;
+                        return out.toByteArray();
+                    }
+                }
                 case ParseResult.NeedMore needMore -> {
                     return out.toByteArray();
                 }
@@ -53,7 +60,7 @@ public final class RespSession {
         }
     }
 
-    /** Whether the connection must be closed (after a protocol error). */
+    /** Whether the connection must be closed (after a protocol error or {@code QUIT}). */
     public boolean shouldClose() {
         return closed;
     }

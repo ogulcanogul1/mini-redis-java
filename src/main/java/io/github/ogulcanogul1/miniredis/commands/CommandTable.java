@@ -12,6 +12,8 @@ import java.util.Set;
 /** Looks commands up by name, case-insensitively. Immutable after construction. */
 public final class CommandTable {
 
+    private static final Bytes QUIT = Bytes.ascii("quit");
+
     private final Map<Bytes, CommandSpec> byName;
 
     /**
@@ -33,6 +35,8 @@ public final class CommandTable {
     public static CommandTable standard() {
         return new CommandTable(List.of(
                 new CommandSpec("ping", -1, Set.of(Flag.READONLY), ConnectionCommands::ping),
+                new CommandSpec("echo", 2, Set.of(Flag.READONLY), ConnectionCommands::echo),
+                new CommandSpec("quit", -1, Set.of(Flag.READONLY), ConnectionCommands::quit),
                 new CommandSpec("set", 3, Set.of(Flag.WRITE), StringCommands::set),
                 new CommandSpec("get", 2, Set.of(Flag.READONLY), StringCommands::get),
                 new CommandSpec("del", -2, Set.of(Flag.WRITE), KeyCommands::del),
@@ -40,6 +44,12 @@ public final class CommandTable {
                 new CommandSpec("keys", 2, Set.of(Flag.READONLY), KeyCommands::keys),
                 new CommandSpec("dbsize", 1, Set.of(Flag.READONLY), KeyCommands::dbsize),
                 new CommandSpec("flushdb", -1, Set.of(Flag.WRITE), KeyCommands::flushdb)));
+    }
+
+    /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */
+    public static boolean isQuit(List<Bytes> argv) {
+        Objects.requireNonNull(argv, "argv");
+        return !argv.isEmpty() && argv.getFirst().toLowerAscii().equals(QUIT);
     }
 
     /** Finds the command called {@code name}, ignoring ASCII case. */

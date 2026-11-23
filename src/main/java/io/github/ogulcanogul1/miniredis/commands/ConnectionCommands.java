@@ -3,7 +3,7 @@ package io.github.ogulcanogul1.miniredis.commands;
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import java.util.List;
 
-/** Connection commands: {@code PING}. */
+/** Connection commands: {@code PING}, {@code ECHO}, {@code QUIT}. */
 final class ConnectionCommands {
 
     private ConnectionCommands() {}
@@ -15,5 +15,15 @@ final class ConnectionCommands {
             case 2 -> Reply.bulk(argv.get(1));
             default -> Errors.wrongArity("ping");
         };
+    }
+
+    /** {@code ECHO message}: returns {@code message} as a bulk string. */
+    static Reply echo(CommandContext ctx, List<Bytes> argv) {
+        return Reply.bulk(argv.get(1));
+    }
+
+    /** {@code QUIT}: always returns {@code +OK}. The session closes the connection right after. */
+    static Reply quit(CommandContext ctx, List<Bytes> argv) {
+        return Reply.OK;
     }
 }
