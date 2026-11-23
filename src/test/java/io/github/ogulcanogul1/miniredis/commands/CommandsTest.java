@@ -145,6 +145,45 @@ class CommandsTest {
         assertThatThrownBy(() -> dispatcher.dispatch(List.of())).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void unknownCommandReplacesLineBreaksWithSpaces() {
+        assertThat(run("F\r\nOO", "a\r\nbc"))
+                .isEqualTo(Reply.error("ERR unknown command 'F  OO', with args beginning with: 'a  bc' "));
+    }
+
+    @Test
+    void unknownCommandCutsNameAndArgumentsAt128Bytes() {
+        String longName = "y".repeat(200);
+        assertThat(run(longName))
+                .isEqualTo(Reply.error("ERR unknown command '" + "y".repeat(128) + "', with args beginning with: "));
+
+        String longArg = "x".repeat(200);
+        assertThat(run("FOO", longArg))
+                .isEqualTo(
+                        Reply.error("ERR unknown command 'FOO', with args beginning with: '" + "x".repeat(128) + "' "));
+
+        String a60 = "a".repeat(60);
+        String b60 = "b".repeat(60);
+        String c60 = "c".repeat(60);
+        assertThat(run("FOO", a60, b60, c60))
+                .isEqualTo(Reply.error(
+                        "ERR unknown command 'FOO', with args beginning with: '" + a60 + "' '" + b60 + "' 'cc' "));
+
+        String x125 = "x".repeat(125);
+        assertThat(run("FOO", x125, "y"))
+                .isEqualTo(Reply.error("ERR unknown command 'FOO', with args beginning with: '" + x125 + "' "));
+    }
+
+    @Test
+    void unknownCommandKeepsRawBytesAndZeroBytesInErrorText() {
+        Reply nonAscii =
+                dispatcher.dispatch(List.of(Bytes.utf8("FOO"), Bytes.of(new byte[] {(byte) 0xC3, (byte) 0xA9})));
+        assertThat(nonAscii).isEqualTo(Reply.error("ERR unknown command 'FOO', with args beginning with: 'Ã©' "));
+
+        Reply withNull = dispatcher.dispatch(List.of(Bytes.utf8("FOO"), Bytes.of(new byte[] {'a', 0, 'b'})));
+        assertThat(withNull).isEqualTo(Reply.error("ERR unknown command 'FOO', with args beginning with: 'a\u0000b' "));
+    }
+
     private Reply run(String... parts) {
         return dispatcher.dispatch(Arrays.stream(parts).map(Bytes::utf8).toList());
     }
