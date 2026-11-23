@@ -99,6 +99,8 @@ public final class ConfigParser {
         private long maxMemoryBytes;
         private EvictionPolicy maxMemoryPolicy;
         private String dbFilename;
+        private String requirePass;
+        private boolean protectedMode;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -120,6 +122,8 @@ public final class ConfigParser {
             this.maxMemoryBytes = base.maxMemoryBytes();
             this.maxMemoryPolicy = base.maxMemoryPolicy();
             this.dbFilename = base.dbFilename();
+            this.requirePass = base.requirePass();
+            this.protectedMode = base.protectedMode();
         }
 
         void apply(String rawKey, String value) {
@@ -206,6 +210,13 @@ public final class ConfigParser {
                     }
                     this.dbFilename = value;
                 }
+                case "requirepass" -> this.requirePass = value.isEmpty() ? null : value;
+                case "protected-mode" ->
+                    this.protectedMode = switch (value.toLowerCase(Locale.ROOT)) {
+                        case "yes" -> true;
+                        case "no" -> false;
+                        default -> throw new ConfigException("invalid protected-mode: " + value);
+                    };
                 default -> throw new ConfigException("unknown config key: " + rawKey);
             }
         }
@@ -230,7 +241,9 @@ public final class ConfigParser {
                     appendFsync,
                     maxMemoryBytes,
                     maxMemoryPolicy,
-                    dbFilename);
+                    dbFilename,
+                    requirePass,
+                    protectedMode);
         }
 
         private static int parseInt(String key, String value) {

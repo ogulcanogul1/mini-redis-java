@@ -53,8 +53,9 @@ public final class RedisServer implements AutoCloseable {
     public RedisServer(ServerConfig config, CommandTable table) {
         this.config = Objects.requireNonNull(config, "config");
         Objects.requireNonNull(table, "table");
-        this.stats = new ServerStats();
         Clock clock = Clock.system();
+        this.stats = new ServerStats(clock);
+        this.stats.setAofEnabled(config.appendOnly());
         Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType(), clock);
         this.activeExpirer = new ActiveExpirer(keyspace);
         RdbStore rdbStore = new RdbStore();
@@ -64,6 +65,7 @@ public final class RedisServer implements AutoCloseable {
             public void save() {
                 try {
                     rdbStore.save(keyspace, dbPath);
+                    stats.recordRdbSave(clock.millis() / 1000L);
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }
@@ -71,7 +73,11 @@ public final class RedisServer implements AutoCloseable {
 
             @Override
             public boolean bgsave() {
-                return rdbStore.bgsave(keyspace, dbPath);
+                boolean started = rdbStore.bgsave(keyspace, dbPath);
+                if (started) {
+                    stats.recordRdbSave(clock.millis() / 1000L);
+                }
+                return started;
             }
         };
         CommandContext ctx = new CommandContext(keyspace, stats, snapshotTrigger);
@@ -87,7 +93,14 @@ public final class RedisServer implements AutoCloseable {
             } catch (IOException e) {
                 throw new UncheckedIOException("failed to initialize AOF at " + aofPath, e);
             }
-            dispatcher = new Dispatcher(table, ctx, aofAppender, config.maxMemoryBytes(), config.maxMemoryPolicy());
+            dispatcher = new Dispatcher(
+                    table,
+                    ctx,
+                    aofAppender,
+                    config.maxMemoryBytes(),
+                    config.maxMemoryPolicy(),
+                    config.requirePass(),
+                    config.protectedMode());
         } else {
             this.aofAppender = null;
             try {
@@ -99,7 +112,13 @@ public final class RedisServer implements AutoCloseable {
                 throw new UncheckedIOException("failed to load snapshot at " + dbPath, e);
             }
             dispatcher = new Dispatcher(
-                    table, ctx, (spec, argv, reply) -> {}, config.maxMemoryBytes(), config.maxMemoryPolicy());
+                    table,
+                    ctx,
+                    (spec, argv, reply) -> {},
+                    config.maxMemoryBytes(),
+                    config.maxMemoryPolicy(),
+                    config.requirePass(),
+                    config.protectedMode());
         }
         this.backend = switch (config.ioModel()) {
             case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);

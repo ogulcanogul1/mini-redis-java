@@ -8,7 +8,9 @@ import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketAddress;
 import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 
@@ -36,7 +38,8 @@ final class ClientSessionLoop {
             InputStream in = client.getInputStream();
             BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream());
             byte[] readBuf = new byte[READ_BUFFER_SIZE];
-            RespSession session = new RespSession(dispatcher, limits);
+            boolean loopback = isLoopback(client.getRemoteSocketAddress());
+            RespSession session = new RespSession(dispatcher, limits, loopback);
 
             while (isRunning.getAsBoolean() && !session.shouldClose()) {
                 int n = in.read(readBuf);
@@ -58,6 +61,13 @@ final class ClientSessionLoop {
             stats.clientDisconnected();
             log.debug("client={} addr={} closed", clientId, remote);
         }
+    }
+
+    static boolean isLoopback(SocketAddress addr) {
+        if (addr instanceof InetSocketAddress isa && isa.getAddress() != null) {
+            return isa.getAddress().isLoopbackAddress();
+        }
+        return true;
     }
 
     static void closeQuietly(Closeable resource) {

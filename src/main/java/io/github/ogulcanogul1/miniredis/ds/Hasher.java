@@ -22,4 +22,9 @@ public interface Hasher<K> {
             return h ^ (h >>> 16);
         };
     }
+
+    /** Returns a SipHash-2-4 {@link Hasher} for {@link Bytes} with a random startup seed. */
+    static Hasher<Bytes> sipHash() {
+        return new SipHasher();
+    }
 }
