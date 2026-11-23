@@ -1,39 +1,63 @@
 package io.github.ogulcanogul1.miniredis;
 
+import io.github.ogulcanogul1.miniredis.server.ConfigException;
+import io.github.ogulcanogul1.miniredis.server.ConfigParser;
+import io.github.ogulcanogul1.miniredis.server.RedisServer;
+import io.github.ogulcanogul1.miniredis.server.ServerConfig;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.util.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/** Entry point. Composition root: later phases wire the server here. */
+/** Entry point. Parses CLI/config arguments, starts {@link RedisServer}, and handles shutdown. */
 public final class Main {
+
+    private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     private Main() {}
 
     public static void main(String[] args) {
-        System.out.println("mini-redis " + version());
+        int code = run(args);
+        if (code != 0) {
+            System.exit(code);
+        }
     }
 
-    /**
-     * Returns the project version, read from {@code version.properties} which Maven fills in through
-     * resource filtering. The version string is written only in {@code pom.xml}.
-     *
-     * @throws IllegalStateException if the resource or the key is missing
-     */
-    static String version() {
-        try (InputStream in = Main.class.getResourceAsStream("/version.properties")) {
-            if (in == null) {
-                throw new IllegalStateException("version.properties not found on the classpath");
-            }
-            Properties props = new Properties();
-            props.load(in);
-            String v = props.getProperty("version");
-            if (v == null || v.isBlank()) {
-                throw new IllegalStateException("version.properties has no 'version' key");
-            }
-            return v;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    public static int run(String[] args) {
+        if (args.length == 1 && ("--version".equals(args[0]) || "-v".equals(args[0]))) {
+            System.out.println("mini-redis " + version());
+            return 0;
         }
+        ServerConfig config;
+        try {
+            config = ConfigParser.parseArgs(args);
+        } catch (ConfigException e) {
+            log.error("invalid configuration: {}", e.getMessage());
+            return 2;
+        }
+        try (RedisServer server = new RedisServer(config)) {
+            Thread shutdownHook = new Thread(server::stop, "shutdown-hook");
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+            try {
+                server.start();
+                server.awaitTermination();
+            } finally {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
+                } catch (IllegalStateException ignored) {
+                    // JVM is already shutting down; the hook is running.
+                }
+            }
+            return 0;
+        } catch (IOException e) {
+            log.error("failed to start server on {}:{}: {}", config.bind(), config.port(), e.getMessage());
+            return 1;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        }
+    }
+
+    static String version() {
+        return RedisServer.version();
     }
 }
