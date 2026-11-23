@@ -14,5 +14,9 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Build, format check, tests
-        run: mvn -B verify
+      # install = verify + copy the jar to the local Maven repo, so bench/ can build against it
+      - name: Build, format check, tests, coverage report
+        run: mvn -B install
+      # Benchmarks are compiled and format-checked in CI, never run there (shared runners are noisy, K13)
+      - name: Benchmarks compile
+        run: mvn -B -f bench/pom.xml verify
