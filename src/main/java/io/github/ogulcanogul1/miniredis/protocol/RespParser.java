@@ -5,6 +5,7 @@ import io.github.ogulcanogul1.miniredis.util.Numbers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
@@ -178,7 +179,20 @@ public final class RespParser {
     }
 
     private ParseResult readInline() {
-        throw new UnsupportedOperationException("inline commands: Adım 2.4");
+        int lf = indexOf((byte) '\n', start);
+        if (lf < 0) {
+            return end - start > limits.maxLineLength() ? fail(ProtocolErrors.TOO_BIG_INLINE) : ParseResult.NEED_MORE;
+        }
+        int lineEnd = lf > start && buf[lf - 1] == '\r' ? lf - 1 : lf;
+        Optional<List<Bytes>> argv = InlineArgs.split(buf, start, lineEnd);
+        start = lf + 1;
+        if (argv.isEmpty()) {
+            return fail(ProtocolErrors.UNBALANCED_QUOTES);
+        }
+        if (argv.get().isEmpty()) {
+            return null; // a blank line is ignored
+        }
+        return new ParseResult.Command(argv.get());
     }
 
     private ParseResult fail(String message) {
