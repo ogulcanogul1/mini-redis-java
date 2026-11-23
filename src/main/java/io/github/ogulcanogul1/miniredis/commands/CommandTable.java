@@ -88,6 +88,7 @@ public final class CommandTable {
                 new CommandSpec("publish", 3, Set.of(Flag.READONLY), (ctx, argv) -> Reply.integer(0)),
                 new CommandSpec("subscribe", -2, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
                 new CommandSpec("unsubscribe", -1, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
+                new CommandSpec("cluster", -2, Set.of(Flag.READONLY), ClusterCommands::cluster),
                 new CommandSpec(
                         "auth",
                         2,
