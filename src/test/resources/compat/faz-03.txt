@@ -92,3 +92,20 @@ SEND 1 *4\r\n$4\r\nMGET\r\n$1\r\na\r\n$1\r\nb\r\n$7\r\nmissing\r\n
 SEND 1 *3\r\n$6\r\nRENAME\r\n$1\r\na\r\n$1\r\nz\r\n
 SEND 1 *2\r\n$3\r\nGET\r\n$1\r\nz\r\n
 SEND 1 *3\r\n$6\r\nRENAME\r\n$7\r\nmissing\r\n$1\r\nx\r\n
+
+--- phase6_ttl_and_set_options
+SEND 1 *5\r\n$3\r\nSET\r\n$2\r\nk1\r\n$2\r\nv1\r\n$2\r\nEX\r\n$2\r\n10\r\n
+SEND 1 *2\r\n$3\r\nTTL\r\n$2\r\nk1\r\n
+SEND 1 *4\r\n$3\r\nSET\r\n$2\r\nk1\r\n$2\r\nv2\r\n$2\r\nNX\r\n
+SEND 1 *4\r\n$3\r\nSET\r\n$2\r\nk1\r\n$2\r\nv2\r\n$2\r\nXX\r\n
+SEND 1 *2\r\n$3\r\nTTL\r\n$2\r\nk1\r\n
+SEND 1 *5\r\n$3\r\nSET\r\n$2\r\nk2\r\n$2\r\n10\r\n$2\r\nEX\r\n$2\r\n50\r\n
+SEND 1 *2\r\n$4\r\nINCR\r\n$2\r\nk2\r\n
+SEND 1 *2\r\n$3\r\nTTL\r\n$2\r\nk2\r\n
+SEND 1 *2\r\n$7\r\nPERSIST\r\n$2\r\nk2\r\n
+SEND 1 *2\r\n$3\r\nTTL\r\n$2\r\nk2\r\n
+SEND 1 *3\r\n$6\r\nEXPIRE\r\n$2\r\nk2\r\n$1\r\n0\r\n
+SEND 1 *2\r\n$3\r\nTTL\r\n$2\r\nk2\r\n
+SEND 1 *5\r\n$3\r\nSET\r\n$2\r\nk3\r\n$1\r\nv\r\n$2\r\nEX\r\n$1\r\n0\r\n
+SEND 1 *6\r\n$3\r\nSET\r\n$2\r\nk3\r\n$1\r\nv\r\n$2\r\nEX\r\n$1\r\n1\r\n$2\r\nPX\r\n$1\r\n1\r\n
+SEND 1 *4\r\n$6\r\nUNLINK\r\n$2\r\nk1\r\n$2\r\nk1\r\n$7\r\nmissing\r\n

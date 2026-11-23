@@ -2,6 +2,7 @@ package io.github.ogulcanogul1.miniredis.commands;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.storage.IncrResult;
+import io.github.ogulcanogul1.miniredis.storage.SetCondition;
 import io.github.ogulcanogul1.miniredis.util.Numbers;
 import java.util.List;
 import java.util.OptionalLong;
@@ -9,12 +10,61 @@ import java.util.OptionalLong;
 /** String commands: {@code SET}, {@code GET}, {@code INCR}, {@code DECR}, {@code INCRBY}, {@code DECRBY}, {@code MGET}, {@code MSET}. */
 final class StringCommands {
 
+    private static final Bytes OPT_EX = Bytes.ascii("ex");
+    private static final Bytes OPT_PX = Bytes.ascii("px");
+    private static final Bytes OPT_NX = Bytes.ascii("nx");
+    private static final Bytes OPT_XX = Bytes.ascii("xx");
+
     private StringCommands() {}
 
-    /** {@code SET key value}: always {@code +OK}. Options (EX, PX, NX, XX) come in Faz 6. */
+    /** {@code SET key value [NX | XX] [EX seconds | PX milliseconds]}. */
     static Reply set(CommandContext ctx, List<Bytes> argv) {
-        ctx.keyspace().set(argv.get(1), argv.get(2));
-        return Reply.OK;
+        SetCondition condition = null;
+        Long ttlMillis = null;
+        for (int i = 3; i < argv.size(); i++) {
+            Bytes opt = argv.get(i).toLowerAscii();
+            if (opt.equals(OPT_NX)) {
+                if (condition == SetCondition.IF_PRESENT) {
+                    return Errors.SYNTAX;
+                }
+                condition = SetCondition.IF_ABSENT;
+            } else if (opt.equals(OPT_XX)) {
+                if (condition == SetCondition.IF_ABSENT) {
+                    return Errors.SYNTAX;
+                }
+                condition = SetCondition.IF_PRESENT;
+            } else if (opt.equals(OPT_EX) || opt.equals(OPT_PX)) {
+                if (ttlMillis != null || i + 1 >= argv.size()) {
+                    return Errors.SYNTAX;
+                }
+                OptionalLong parsed = parseDelta(argv.get(++i));
+                if (parsed.isEmpty()) {
+                    return Errors.NOT_INTEGER;
+                }
+                long raw = parsed.getAsLong();
+                if (raw <= 0) {
+                    return Errors.invalidExpireTime("set");
+                }
+                if (opt.equals(OPT_EX)) {
+                    try {
+                        ttlMillis = Math.multiplyExact(raw, 1000L);
+                    } catch (ArithmeticException e) {
+                        return Errors.invalidExpireTime("set");
+                    }
+                } else {
+                    ttlMillis = raw;
+                }
+            } else {
+                return Errors.SYNTAX;
+            }
+        }
+        SetCondition effective = condition == null ? SetCondition.ALWAYS : condition;
+        try {
+            boolean written = ctx.keyspace().set(argv.get(1), argv.get(2), effective, ttlMillis);
+            return written ? Reply.OK : Reply.NIL;
+        } catch (IllegalArgumentException e) {
+            return Errors.invalidExpireTime("set");
+        }
     }
 
     /** {@code GET key}: the value as a bulk string, or nil. */

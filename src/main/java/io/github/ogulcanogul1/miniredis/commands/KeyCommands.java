@@ -2,12 +2,15 @@ package io.github.ogulcanogul1.miniredis.commands;
 
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import io.github.ogulcanogul1.miniredis.util.Glob;
+import io.github.ogulcanogul1.miniredis.util.Numbers;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalLong;
 
 /**
- * Generic key commands: {@code DEL}, {@code EXISTS}, {@code KEYS}, {@code DBSIZE}, {@code FLUSHDB},
- * {@code RENAME}.
+ * Generic key commands: {@code DEL}, {@code UNLINK}, {@code EXISTS}, {@code KEYS}, {@code DBSIZE},
+ * {@code FLUSHDB}, {@code RENAME}, {@code EXPIRE}, {@code PEXPIRE}, {@code PEXPIREAT}, {@code TTL},
+ * {@code PTTL}, {@code PERSIST}.
  */
 final class KeyCommands {
 
@@ -52,5 +55,75 @@ final class KeyCommands {
         }
         ctx.keyspace().flush();
         return Reply.OK;
+    }
+
+    /** {@code EXPIRE key seconds}: sets a relative TTL in seconds. */
+    static Reply expire(CommandContext ctx, List<Bytes> argv) {
+        OptionalLong parsed = parseLong(argv.get(2));
+        if (parsed.isEmpty()) {
+            return Errors.NOT_INTEGER;
+        }
+        long seconds = parsed.getAsLong();
+        long ttlMillis;
+        if (seconds <= 0) {
+            ttlMillis = seconds;
+        } else {
+            try {
+                ttlMillis = Math.multiplyExact(seconds, 1000L);
+            } catch (ArithmeticException e) {
+                return Errors.invalidExpireTime("expire");
+            }
+        }
+        try {
+            return Reply.integer(ctx.keyspace().expire(argv.get(1), ttlMillis) ? 1 : 0);
+        } catch (IllegalArgumentException e) {
+            return Errors.invalidExpireTime("expire");
+        }
+    }
+
+    /** {@code PEXPIRE key milliseconds}: sets a relative TTL in milliseconds. */
+    static Reply pexpire(CommandContext ctx, List<Bytes> argv) {
+        OptionalLong parsed = parseLong(argv.get(2));
+        if (parsed.isEmpty()) {
+            return Errors.NOT_INTEGER;
+        }
+        try {
+            return Reply.integer(ctx.keyspace().expire(argv.get(1), parsed.getAsLong()) ? 1 : 0);
+        } catch (IllegalArgumentException e) {
+            return Errors.invalidExpireTime("pexpire");
+        }
+    }
+
+    /** {@code PEXPIREAT key unix-time-milliseconds}: sets an absolute expiration timestamp in ms. */
+    static Reply pexpireAt(CommandContext ctx, List<Bytes> argv) {
+        OptionalLong parsed = parseLong(argv.get(2));
+        if (parsed.isEmpty()) {
+            return Errors.NOT_INTEGER;
+        }
+        return Reply.integer(ctx.keyspace().expireAt(argv.get(1), parsed.getAsLong()) ? 1 : 0);
+    }
+
+    /** {@code TTL key}: remaining time-to-live in seconds ({@code -2} absent, {@code -1} persistent). */
+    static Reply ttl(CommandContext ctx, List<Bytes> argv) {
+        long pttl = ctx.keyspace().pttl(argv.get(1));
+        if (pttl < 0) {
+            return Reply.integer(pttl);
+        }
+        return Reply.integer((pttl + 500) / 1000);
+    }
+
+    /** {@code PTTL key}: remaining time-to-live in milliseconds ({@code -2} absent, {@code -1} persistent). */
+    static Reply pttl(CommandContext ctx, List<Bytes> argv) {
+        return Reply.integer(ctx.keyspace().pttl(argv.get(1)));
+    }
+
+    /** {@code PERSIST key}: removes an existing TTL, returning {@code 1} if removed. */
+    static Reply persist(CommandContext ctx, List<Bytes> argv) {
+        return Reply.integer(ctx.keyspace().persist(argv.get(1)) ? 1 : 0);
+    }
+
+    private static OptionalLong parseLong(Bytes raw) {
+        byte[] data = raw.toByteArray();
+        return Numbers.parseLong(data, 0, data.length);
     }
 }
