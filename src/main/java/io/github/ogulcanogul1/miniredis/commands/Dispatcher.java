@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +42,7 @@ public final class Dispatcher {
     private final EvictionPolicy evictionPolicy;
     private final byte[] requirePass;
     private final boolean protectedMode;
+    private final PubSubBroker pubSub = new PubSubBroker();
 
     public Dispatcher(CommandTable table, CommandContext ctx) {
         this(table, ctx, (spec, argv, reply) -> {});
@@ -81,9 +83,21 @@ public final class Dispatcher {
 
     /** Creates the initial authentication/protected-mode state for a new client connection. */
     public SessionAuthState newSessionState(boolean loopback) {
+        return newSessionState(loopback, reply -> {});
+    }
+
+    /** Creates the initial session state with an async push sink for Pub/Sub messages. */
+    public SessionAuthState newSessionState(boolean loopback, Consumer<Reply> asyncReplySink) {
         boolean blocked = protectedMode && requirePass == null && !loopback;
         boolean authenticated = requirePass == null;
-        return new SessionAuthState(authenticated, blocked);
+        return new SessionAuthState(authenticated, blocked, asyncReplySink);
+    }
+
+    /** Cleans up per-session resources (such as Pub/Sub subscriptions) on disconnect. */
+    public void closeSession(SessionAuthState authState) {
+        if (authState != null) {
+            pubSub.unsubscribeAll(authState);
+        }
     }
 
     /** Runs {@code argv} with an unrestricted in-process session state. */
@@ -136,6 +150,29 @@ public final class Dispatcher {
         }
         if (!authState.isAuthenticated() && !"quit".equals(cmdName)) {
             return recordError(NOAUTH_ERROR);
+        }
+
+        if (authState.subscriptionCount() > 0
+                && !"subscribe".equals(cmdName)
+                && !"unsubscribe".equals(cmdName)
+                && !"ping".equals(cmdName)
+                && !"quit".equals(cmdName)) {
+            return recordError(new Reply.ErrorReply("ERR Can't execute '"
+                    + cmdName
+                    + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"));
+        }
+
+        if ("publish".equals(cmdName) || "subscribe".equals(cmdName) || "unsubscribe".equals(cmdName)) {
+            if (!spec.acceptsArgCount(argv.size())) {
+                return recordError(Errors.wrongArity(cmdName));
+            }
+            ctx.stats().recordCommand();
+            return switch (cmdName) {
+                case "publish" -> Reply.integer(pubSub.publish(argv.get(1), argv.get(2)));
+                case "subscribe" -> pubSub.subscribe(authState, argv.subList(1, argv.size()));
+                case "unsubscribe" -> pubSub.unsubscribe(authState, argv.subList(1, argv.size()));
+                default -> throw new IllegalStateException(cmdName);
+            };
         }
 
         if ("multi".equals(cmdName)

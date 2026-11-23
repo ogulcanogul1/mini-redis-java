@@ -39,6 +39,7 @@ final class ReactorEventLoop implements AutoCloseable {
     private final Runnable onConnectionClosed;
     private final Selector selector;
     private final ConcurrentLinkedQueue<SocketChannel> pendingRegistrations = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Runnable> pendingTasks = new ConcurrentLinkedQueue<>();
     private final ByteBuffer readBuffer = ByteBuffer.allocate(ClientSessionLoop.READ_BUFFER_SIZE);
     private final CountDownLatch terminated = new CountDownLatch(1);
     private final Object lifecycleLock = new Object();
@@ -143,6 +144,7 @@ final class ReactorEventLoop implements AutoCloseable {
                     break;
                 }
                 drainRegistrations();
+                drainPendingTasks();
                 processSelectedKeys();
                 if (idleTimeoutNanos > 0) {
                     sweepIdleConnections();
@@ -164,7 +166,16 @@ final class ReactorEventLoop implements AutoCloseable {
                 SelectionKey key = ch.register(selector, SelectionKey.OP_READ);
                 long id = nextClientId++;
                 NioConnection conn = new NioConnection(
-                        id, ch, key, dispatcher, limits, maxOutputBytes, stats, clock, onConnectionClosed);
+                        id,
+                        ch,
+                        key,
+                        dispatcher,
+                        limits,
+                        maxOutputBytes,
+                        stats,
+                        clock,
+                        onConnectionClosed,
+                        this::submitTask);
                 key.attach(conn);
                 stats.clientConnected();
                 log.debug("client={} addr={} connected ({})", id, conn.remoteAddress(), name);
@@ -172,6 +183,22 @@ final class ReactorEventLoop implements AutoCloseable {
                 log.debug("failed to register channel on {}: {}", name, e.getMessage());
                 ClientSessionLoop.closeQuietly(ch);
                 onConnectionClosed.run();
+            }
+        }
+    }
+
+    private void submitTask(Runnable task) {
+        pendingTasks.add(task);
+        selector.wakeup();
+    }
+
+    private void drainPendingTasks() {
+        Runnable task;
+        while ((task = pendingTasks.poll()) != null) {
+            try {
+                task.run();
+            } catch (RuntimeException e) {
+                log.debug("error executing reactor task on {}: {}", name, e.getMessage());
             }
         }
     }

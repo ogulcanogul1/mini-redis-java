@@ -85,6 +85,9 @@ public final class CommandTable {
                 new CommandSpec("discard", 1, Set.of(), (ctx, argv) -> Reply.OK),
                 new CommandSpec("watch", -2, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
                 new CommandSpec("unwatch", 1, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
+                new CommandSpec("publish", 3, Set.of(Flag.READONLY), (ctx, argv) -> Reply.integer(0)),
+                new CommandSpec("subscribe", -2, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
+                new CommandSpec("unsubscribe", -1, Set.of(Flag.READONLY), (ctx, argv) -> Reply.OK),
                 new CommandSpec(
                         "auth",
                         2,

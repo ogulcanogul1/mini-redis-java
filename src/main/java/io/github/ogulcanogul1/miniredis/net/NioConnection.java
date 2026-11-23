@@ -12,6 +12,7 @@ import java.nio.channels.SocketChannel;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Objects;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,16 +51,32 @@ final class NioConnection {
             ServerStats stats,
             Clock clock,
             Runnable onClose) {
+        this(clientId, channel, key, dispatcher, limits, maxOutputBytes, stats, clock, onClose, task -> {});
+    }
+
+    NioConnection(
+            long clientId,
+            SocketChannel channel,
+            SelectionKey key,
+            Dispatcher dispatcher,
+            RespLimits limits,
+            long maxOutputBytes,
+            ServerStats stats,
+            Clock clock,
+            Runnable onClose,
+            Consumer<Runnable> submitTask) {
         this.clientId = clientId;
         this.channel = Objects.requireNonNull(channel, "channel");
         this.key = Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(submitTask, "submitTask");
         boolean loopback;
         try {
             loopback = ClientSessionLoop.isLoopback(channel.getRemoteAddress());
         } catch (IOException e) {
             loopback = true;
         }
-        this.session = new RespSession(dispatcher, limits, loopback);
+        this.session =
+                new RespSession(dispatcher, limits, loopback, bytes -> submitTask.accept(() -> enqueueAsync(bytes)));
         this.maxOutputBytes = maxOutputBytes;
         this.stats = Objects.requireNonNull(stats, "stats");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -128,6 +145,7 @@ final class NioConnection {
             return;
         }
         closed = true;
+        session.close();
         outbound.clear();
         queuedOutputBytes = 0;
         key.cancel();
@@ -135,6 +153,28 @@ final class NioConnection {
         stats.clientDisconnected();
         onClose.run();
         log.debug("client={} addr={} closed", clientId, remoteAddress);
+    }
+
+    private void enqueueAsync(byte[] bytes) {
+        if (closed || bytes.length == 0) {
+            return;
+        }
+        if (bytes.length > maxOutputBytes - queuedOutputBytes) {
+            log.warn(
+                    "client={} addr={} exceeded output buffer limit {} bytes, closing",
+                    clientId,
+                    remoteAddress,
+                    maxOutputBytes);
+            close();
+            return;
+        }
+        outbound.addLast(ByteBuffer.wrap(bytes));
+        queuedOutputBytes += bytes.length;
+        try {
+            flushOutbound();
+        } catch (IOException e) {
+            close();
+        }
     }
 
     private void flushOutbound() throws IOException {
