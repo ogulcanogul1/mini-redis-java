@@ -3,6 +3,8 @@ package io.github.ogulcanogul1.miniredis.storage;
 import io.github.ogulcanogul1.miniredis.ds.Bytes;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalLong;
 import java.util.function.Consumer;
 
 /**
@@ -20,6 +22,60 @@ public interface Keyspace {
 
     /** Returns the value of {@code key}, or {@link Optional#empty()} if absent or expired. */
     Optional<Bytes> get(Bytes key);
+
+    /** Returns the string value of {@code key}, or {@link KeyspaceResult.WrongType} if another type. */
+    KeyspaceResult<Optional<Bytes>> getString(Bytes key);
+
+    /** Pushes {@code values} to the head ({@code left=true}) or tail of a list, returning its new length. */
+    KeyspaceResult<Integer> listPush(Bytes key, List<Bytes> values, boolean left);
+
+    /** Pops one element from the head ({@code left=true}) or tail of a list, deleting the key if empty. */
+    KeyspaceResult<Optional<Bytes>> listPop(Bytes key, boolean left);
+
+    /** Returns elements in inclusive {@code [start, stop]} (supporting negative indices) of a list. */
+    KeyspaceResult<List<Bytes>> listRange(Bytes key, long start, long stop);
+
+    /** Returns the length of the list at {@code key} ({@code 0} if absent or expired). */
+    KeyspaceResult<Integer> listLen(Bytes key);
+
+    /** Sets field/value pairs in a hash, returning the number of newly added fields. */
+    KeyspaceResult<Integer> hashSet(Bytes key, List<Bytes> fieldsAndValues);
+
+    /** Returns the value of {@code field} in the hash at {@code key}. */
+    KeyspaceResult<Optional<Bytes>> hashGet(Bytes key, Bytes field);
+
+    /** Removes {@code fields} from the hash at {@code key}, deleting the key if empty. */
+    KeyspaceResult<Integer> hashDel(Bytes key, List<Bytes> fields);
+
+    /** Returns alternating {@code field, value} pairs of the hash at {@code key}. */
+    KeyspaceResult<List<Bytes>> hashGetAll(Bytes key);
+
+    /** Adds {@code members} to the set at {@code key}, returning the count of newly added members. */
+    KeyspaceResult<Integer> setAdd(Bytes key, List<Bytes> members);
+
+    /** Removes {@code members} from the set at {@code key}, deleting the key if empty. */
+    KeyspaceResult<Integer> setRem(Bytes key, List<Bytes> members);
+
+    /** Returns whether {@code member} belongs to the set at {@code key}. */
+    KeyspaceResult<Boolean> setIsMember(Bytes key, Bytes member);
+
+    /** Returns all members of the set at {@code key} (empty list if absent). */
+    KeyspaceResult<List<Bytes>> setMembers(Bytes key);
+
+    /** Adds or updates {@code entries} in the sorted set at {@code key}, returning newly added count. */
+    KeyspaceResult<Integer> zadd(Bytes key, List<ZSetEntry> entries);
+
+    /** Returns the score of {@code member} in the sorted set at {@code key}. */
+    KeyspaceResult<OptionalDouble> zscore(Bytes key, Bytes member);
+
+    /** Returns entries in inclusive 0-based index range {@code [start, stop]} of the sorted set. */
+    KeyspaceResult<List<ZSetEntry>> zrange(Bytes key, long start, long stop);
+
+    /** Returns entries with score in {@code [min, max]} of the sorted set. */
+    KeyspaceResult<List<ZSetEntry>> zrangeByScore(Bytes key, double min, double max);
+
+    /** Returns the 0-based rank of {@code member} in the sorted set at {@code key}. */
+    KeyspaceResult<OptionalLong> zrank(Bytes key, Bytes member);
 
     /** Sets {@code key} to {@code value} unconditionally, clearing any existing TTL. */
     void set(Bytes key, Bytes value);
