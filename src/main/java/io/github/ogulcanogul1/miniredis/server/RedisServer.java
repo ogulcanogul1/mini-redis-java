@@ -11,6 +11,7 @@ import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPerConnServer;
 import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
 import io.github.ogulcanogul1.miniredis.net.VirtualThreadServer;
+import io.github.ogulcanogul1.miniredis.storage.ActiveExpirer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
 import io.github.ogulcanogul1.miniredis.util.Clock;
@@ -34,6 +35,7 @@ public final class RedisServer implements AutoCloseable {
 
     private final ServerConfig config;
     private final ServerStats stats;
+    private final ActiveExpirer activeExpirer;
     private final ServerBackend backend;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -47,7 +49,8 @@ public final class RedisServer implements AutoCloseable {
         Objects.requireNonNull(table, "table");
         this.stats = new ServerStats();
         Clock clock = Clock.system();
-        Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType());
+        Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType(), clock);
+        this.activeExpirer = new ActiveExpirer(keyspace);
         Dispatcher dispatcher = new Dispatcher(table, new CommandContext(keyspace, stats));
         this.backend = switch (config.ioModel()) {
             case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);
@@ -107,6 +110,7 @@ public final class RedisServer implements AutoCloseable {
     public void start() throws IOException {
         applyLogLevel(config.logLevel());
         backend.start();
+        activeExpirer.start();
         started.set(true);
         log.info(
                 "mini-redis {} listening on {}:{} (io-model={}, shards={}, lock-type={})",
@@ -123,8 +127,9 @@ public final class RedisServer implements AutoCloseable {
         backend.awaitTermination();
     }
 
-    /** Stops the network backend cleanly. Idempotent. */
+    /** Stops the network backend and active expirer cleanly. Idempotent. */
     public void stop() {
+        activeExpirer.close();
         backend.stop();
         if (started.get() && stopped.compareAndSet(false, true)) {
             log.info("mini-redis stopped");
