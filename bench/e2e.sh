@@ -8,7 +8,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-    echo "usage: bash bench/e2e.sh <name> [clients=1] [requests=20000] [runs=5]" >&2
+    echo "usage: bash bench/e2e.sh <name> [clients=1] [requests=20000] [runs=5] [server args...]" >&2
     exit 2
 fi
 
@@ -16,6 +16,8 @@ NAME="$1"
 CLIENTS="${2:-1}"
 REQUESTS="${3:-20000}"
 RUNS="${4:-5}"
+shift $(( $# >= 4 ? 4 : $# ))
+EXTRA_ARGS=("$@")
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/bench/results/$(date +%Y-%m-%d-%H%M)-$NAME"
@@ -42,8 +44,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
+EXTRA_LABEL="${EXTRA_ARGS[*]:-default}"
 python "$ROOT/bench/report.py" env "$OUT" --java "$JAVA" \
-    --jvm-args "-Xms1g -Xmx1g (Docker --cpus=$CPUS --memory=$MEMORY)" \
+    --jvm-args "-Xms1g -Xmx1g (Docker --cpus=$CPUS --memory=$MEMORY, server=${EXTRA_LABEL})" \
     --jmh-args "redis-benchmark -c $CLIENTS -n $REQUESTS -t ping,set,get --csv (runs=$RUNS)"
 
 docker build -t mini-redis:bench "$ROOT"
@@ -67,7 +70,7 @@ run_suite() {
 
 # 1. mini-redis
 docker run -d --name "$OUR_CTR" --network "$NET" --cpus="$CPUS" --memory="$MEMORY" \
-    mini-redis:bench --bind 0.0.0.0 --port 6380 --loglevel warning >/dev/null
+    mini-redis:bench --bind 0.0.0.0 --port 6380 --loglevel warning ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} >/dev/null
 sleep 2
 run_suite "ours" "$OUR_CTR" 6380
 docker rm -f "$OUR_CTR" >/dev/null

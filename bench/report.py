@@ -1,19 +1,23 @@
-"""Records benchmark environments and summarizes JMH results (K13). Standard library only.
+"""Records benchmark environments, summarizes/compares JMH results, and plots charts (K13).
 
   python bench/report.py env <dir> --java <java> --jvm-args "<args>" --jmh-args "<args>"
   python bench/report.py summarize <dir>
   python bench/report.py compare <dir> <baseline benchmark> <candidate benchmark>
+  python bench/report.py plot <dir> [--out plot.png]
 
 `compare` prints, for every parameter combination, baseline -> candidate, the ratio and whether
-the 99.9% confidence intervals overlap. Only a non-overlapping pair supports a claim.
+the 99.9% confidence intervals overlap. Only a non-overlapping pair supports a claim. `plot` uses
+matplotlib (optional for `env`/`summarize`/`compare`).
 """
 
 import argparse
 import csv
 import datetime
 import json
+import math
 import os
 import platform
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -164,6 +168,67 @@ def cmd_compare(args):
         sys.exit(1)
 
 
+def _read_e2e_rps(dir_, prefix):
+    by_test = {}
+    for path in sorted(Path(dir_).glob(f"{prefix}-run-*.csv")):
+        with path.open(encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                by_test.setdefault(row["test"], []).append(float(row["rps"]))
+    return by_test
+
+
+def cmd_plot(args):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out_dir = Path(args.dir)
+    out_file = Path(args.out) if Path(args.out).is_absolute() else out_dir / args.out
+    summary_csv = out_dir / "summary.csv"
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    if summary_csv.is_file():
+        with summary_csv.open(encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            print("empty summary.csv", file=sys.stderr)
+            sys.exit(1)
+        labels = [f"{r['benchmark']} ({r['params']})" if r["params"] else r["benchmark"] for r in rows]
+        scores = [float(r["score"]) for r in rows]
+        errs = [0.0 if math.isnan(float(r["error_99_9"])) else float(r["error_99_9"]) for r in rows]
+        y = list(range(len(labels)))
+        ax.barh(y, scores, xerr=errs, capsize=3)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(rows[0]["unit"])
+        ax.set_title(out_dir.name)
+    else:
+        ours = _read_e2e_rps(out_dir, "ours")
+        ref = _read_e2e_rps(out_dir, "redis")
+        tests = list(ours.keys())
+        if not tests or not ref:
+            print(f"no summary.csv or E2E CSVs in {out_dir}", file=sys.stderr)
+            sys.exit(1)
+        x = list(range(len(tests)))
+        w = 0.35
+        our_meds = [statistics.median(ours[t]) for t in tests]
+        ref_meds = [statistics.median(ref[t]) for t in tests]
+        ax.bar([i - w / 2 for i in x], our_meds, width=w, label="mini-redis")
+        ax.bar([i + w / 2 for i in x], ref_meds, width=w, label="redis-7.0.15")
+        ax.set_xticks(x)
+        ax.set_xticklabels(tests)
+        ax.set_ylabel("Requests / sec (median)")
+        ax.set_title(out_dir.name)
+        ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(out_file, dpi=150)
+    plt.close(fig)
+    print(f"wrote {out_file}")
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -178,8 +243,11 @@ def main():
     c.add_argument("dir")
     c.add_argument("baseline")
     c.add_argument("candidate")
+    pl = sub.add_parser("plot")
+    pl.add_argument("dir")
+    pl.add_argument("--out", default="plot.png")
     args = p.parse_args()
-    {"env": cmd_env, "summarize": cmd_summarize, "compare": cmd_compare}[args.cmd](args)
+    {"env": cmd_env, "summarize": cmd_summarize, "compare": cmd_compare, "plot": cmd_plot}[args.cmd](args)
 
 
 if __name__ == "__main__":
