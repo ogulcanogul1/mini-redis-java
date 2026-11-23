@@ -34,6 +34,8 @@ public final class Dispatcher {
             "DENIED Redis is running in protected mode because protected mode is enabled and no password is set for the default user. In this mode connections are only accepted from the loopback interface.");
     private static final Reply EXEC_ABORT_ERROR =
             new Reply.ErrorReply("EXECABORT Transaction discarded because of previous errors.");
+    private static final Reply READONLY_REPLICA_ERROR =
+            new Reply.ErrorReply("READONLY You can't write against a read only replica.");
 
     private final CommandTable table;
     private final CommandContext ctx;
@@ -42,7 +44,9 @@ public final class Dispatcher {
     private final EvictionPolicy evictionPolicy;
     private final byte[] requirePass;
     private final boolean protectedMode;
+    private final boolean replicaReadOnly;
     private final PubSubBroker pubSub = new PubSubBroker();
+    private final ReplicationBroker replication = new ReplicationBroker();
 
     public Dispatcher(CommandTable table, CommandContext ctx) {
         this(table, ctx, (spec, argv, reply) -> {});
@@ -69,6 +73,18 @@ public final class Dispatcher {
             EvictionPolicy evictionPolicy,
             String requirePass,
             boolean protectedMode) {
+        this(table, ctx, writeListener, maxMemoryBytes, evictionPolicy, requirePass, protectedMode, false);
+    }
+
+    public Dispatcher(
+            CommandTable table,
+            CommandContext ctx,
+            WriteListener writeListener,
+            long maxMemoryBytes,
+            EvictionPolicy evictionPolicy,
+            String requirePass,
+            boolean protectedMode,
+            boolean replicaReadOnly) {
         this.table = Objects.requireNonNull(table, "table");
         this.ctx = Objects.requireNonNull(ctx, "ctx");
         this.writeListener = Objects.requireNonNull(writeListener, "writeListener");
@@ -79,6 +95,7 @@ public final class Dispatcher {
         this.evictionPolicy = Objects.requireNonNull(evictionPolicy, "evictionPolicy");
         this.requirePass = requirePass != null ? requirePass.getBytes(StandardCharsets.UTF_8) : null;
         this.protectedMode = protectedMode;
+        this.replicaReadOnly = replicaReadOnly;
     }
 
     /** Creates the initial authentication/protected-mode state for a new client connection. */
@@ -93,10 +110,11 @@ public final class Dispatcher {
         return new SessionAuthState(authenticated, blocked, asyncReplySink);
     }
 
-    /** Cleans up per-session resources (such as Pub/Sub subscriptions) on disconnect. */
+    /** Cleans up per-session resources (Pub/Sub subscriptions, replica sinks) on disconnect. */
     public void closeSession(SessionAuthState authState) {
         if (authState != null) {
             pubSub.unsubscribeAll(authState);
+            replication.removeReplica(authState);
         }
     }
 
@@ -171,6 +189,22 @@ public final class Dispatcher {
                 case "publish" -> Reply.integer(pubSub.publish(argv.get(1), argv.get(2)));
                 case "subscribe" -> pubSub.subscribe(authState, argv.subList(1, argv.size()));
                 case "unsubscribe" -> pubSub.unsubscribe(authState, argv.subList(1, argv.size()));
+                default -> throw new IllegalStateException(cmdName);
+            };
+        }
+
+        if ("replconf".equals(cmdName) || "psync".equals(cmdName) || "role".equals(cmdName)) {
+            if (!spec.acceptsArgCount(argv.size())) {
+                return recordError(Errors.wrongArity(cmdName));
+            }
+            ctx.stats().recordCommand();
+            return switch (cmdName) {
+                case "replconf" -> Reply.OK;
+                case "psync" -> replication.handlePsync(authState, ctx);
+                case "role" ->
+                    Reply.array(List.of(
+                            Reply.bulk(Bytes.utf8(replicaReadOnly ? "slave" : "master")),
+                            Reply.integer(replication.replicaCount())));
                 default -> throw new IllegalStateException(cmdName);
             };
         }
@@ -268,6 +302,9 @@ public final class Dispatcher {
 
     private Reply executeSpec(CommandSpec spec, List<Bytes> argv) {
         String cmdName = spec.name();
+        if (replicaReadOnly && spec.flags().contains(CommandSpec.Flag.WRITE)) {
+            return recordError(READONLY_REPLICA_ERROR);
+        }
         if (maxMemoryBytes > 0 && spec.flags().contains(CommandSpec.Flag.WRITE) && !freesMemory(cmdName)) {
             ctx.keyspace().evictIfNeeded(maxMemoryBytes, evictionPolicy, DEFAULT_EVICTION_SAMPLES);
             if (ctx.keyspace().usedMemoryBytes() > maxMemoryBytes) {
@@ -281,6 +318,7 @@ public final class Dispatcher {
             } else if (spec.flags().contains(CommandSpec.Flag.WRITE)) {
                 ctx.stats().recordWriteForRdb();
                 writeListener.onWrite(spec, argv, reply);
+                replication.propagate(argv);
                 if (maxMemoryBytes > 0 && evictionPolicy != EvictionPolicy.NOEVICTION) {
                     ctx.keyspace().evictIfNeeded(maxMemoryBytes, evictionPolicy, DEFAULT_EVICTION_SAMPLES);
                 }

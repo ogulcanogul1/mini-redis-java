@@ -6,6 +6,7 @@ import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
 import io.github.ogulcanogul1.miniredis.commands.ServerStats;
 import io.github.ogulcanogul1.miniredis.commands.SnapshotTrigger;
+import io.github.ogulcanogul1.miniredis.commands.WriteListener;
 import io.github.ogulcanogul1.miniredis.net.MultiReactorServer;
 import io.github.ogulcanogul1.miniredis.net.ServerBackend;
 import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
@@ -14,6 +15,7 @@ import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
 import io.github.ogulcanogul1.miniredis.net.VirtualThreadServer;
 import io.github.ogulcanogul1.miniredis.persistence.AofAppender;
 import io.github.ogulcanogul1.miniredis.persistence.AofLoader;
+import io.github.ogulcanogul1.miniredis.persistence.RdbCodec;
 import io.github.ogulcanogul1.miniredis.persistence.RdbStore;
 import io.github.ogulcanogul1.miniredis.storage.ActiveExpirer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
@@ -42,6 +44,7 @@ public final class RedisServer implements AutoCloseable {
     private final ServerStats stats;
     private final ActiveExpirer activeExpirer;
     private final AofAppender aofAppender;
+    private final ReplicationClient replicationClient;
     private final ServerBackend backend;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -79,9 +82,16 @@ public final class RedisServer implements AutoCloseable {
                 }
                 return started;
             }
+
+            @Override
+            public byte[] encodeSnapshot() {
+                return RdbCodec.encode(keyspace.snapshotEntries());
+            }
         };
         CommandContext ctx = new CommandContext(keyspace, stats, snapshotTrigger);
+        boolean isReplica = config.replicaOfHost() != null;
         Dispatcher dispatcher;
+        WriteListener aofOrNoop;
         if (config.appendOnly()) {
             Path aofPath = Path.of(config.appendFilename());
             try {
@@ -93,6 +103,7 @@ public final class RedisServer implements AutoCloseable {
             } catch (IOException e) {
                 throw new UncheckedIOException("failed to initialize AOF at " + aofPath, e);
             }
+            aofOrNoop = aofAppender;
             dispatcher = new Dispatcher(
                     table,
                     ctx,
@@ -100,9 +111,11 @@ public final class RedisServer implements AutoCloseable {
                     config.maxMemoryBytes(),
                     config.maxMemoryPolicy(),
                     config.requirePass(),
-                    config.protectedMode());
+                    config.protectedMode(),
+                    isReplica);
         } else {
             this.aofAppender = null;
+            aofOrNoop = (spec, argv, reply) -> {};
             try {
                 int loaded = rdbStore.load(keyspace, dbPath);
                 if (loaded > 0) {
@@ -114,11 +127,25 @@ public final class RedisServer implements AutoCloseable {
             dispatcher = new Dispatcher(
                     table,
                     ctx,
-                    (spec, argv, reply) -> {},
+                    aofOrNoop,
                     config.maxMemoryBytes(),
                     config.maxMemoryPolicy(),
                     config.requirePass(),
-                    config.protectedMode());
+                    config.protectedMode(),
+                    isReplica);
+        }
+        if (isReplica) {
+            Dispatcher applyDispatcher = new Dispatcher(
+                    table, ctx, aofOrNoop, config.maxMemoryBytes(), config.maxMemoryPolicy(), null, false, false);
+            this.replicationClient = new ReplicationClient(
+                    config.replicaOfHost(),
+                    config.replicaOfPort(),
+                    config.port(),
+                    keyspace,
+                    applyDispatcher,
+                    config.respLimits());
+        } else {
+            this.replicationClient = null;
         }
         this.backend = switch (config.ioModel()) {
             case SINGLE -> new SingleThreadServer(config.bind(), config.port(), dispatcher, config.respLimits(), stats);
@@ -182,6 +209,9 @@ public final class RedisServer implements AutoCloseable {
         if (aofAppender != null) {
             aofAppender.start();
         }
+        if (replicationClient != null) {
+            replicationClient.start();
+        }
         started.set(true);
         log.info(
                 "mini-redis {} listening on {}:{} (io-model={}, shards={}, lock-type={})",
@@ -200,6 +230,9 @@ public final class RedisServer implements AutoCloseable {
 
     /** Stops the network backend, active expirer, and AOF appender cleanly. Idempotent. */
     public void stop() {
+        if (replicationClient != null) {
+            replicationClient.close();
+        }
         activeExpirer.close();
         backend.stop();
         if (aofAppender != null) {

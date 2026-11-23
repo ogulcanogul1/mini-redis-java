@@ -69,6 +69,16 @@ public final class ConfigParser {
             if (!opt.startsWith("--") || opt.length() == 2) {
                 throw new ConfigException("expected --key value, got: " + opt);
             }
+            if ("--replicaof".equals(opt)) {
+                if (i + 2 >= args.length) {
+                    throw new ConfigException("expected --replicaof <host> <port>");
+                }
+                builder.applyReplicaOf(
+                        Objects.requireNonNull(args[i + 1], "replicaof host"),
+                        Objects.requireNonNull(args[i + 2], "replicaof port"));
+                i += 3;
+                continue;
+            }
             if (i + 1 >= args.length) {
                 throw new ConfigException("missing value for option: " + opt);
             }
@@ -101,6 +111,8 @@ public final class ConfigParser {
         private String dbFilename;
         private String requirePass;
         private boolean protectedMode;
+        private String replicaOfHost;
+        private int replicaOfPort;
 
         Builder(ServerConfig base) {
             this.bind = base.bind();
@@ -124,6 +136,8 @@ public final class ConfigParser {
             this.dbFilename = base.dbFilename();
             this.requirePass = base.requirePass();
             this.protectedMode = base.protectedMode();
+            this.replicaOfHost = base.replicaOfHost();
+            this.replicaOfPort = base.replicaOfPort();
         }
 
         void apply(String rawKey, String value) {
@@ -221,6 +235,11 @@ public final class ConfigParser {
             }
         }
 
+        void applyReplicaOf(String host, String portStr) {
+            this.replicaOfHost = host;
+            this.replicaOfPort = parseInt("replicaof", portStr);
+        }
+
         ServerConfig build() {
             return new ServerConfig(
                     bind,
@@ -243,7 +262,9 @@ public final class ConfigParser {
                     maxMemoryPolicy,
                     dbFilename,
                     requirePass,
-                    protectedMode);
+                    protectedMode,
+                    replicaOfHost,
+                    replicaOfPort);
         }
 
         private static int parseInt(String key, String value) {
