@@ -625,6 +625,36 @@ final class HashMapKeyspace implements Keyspace {
         }
     }
 
+    @Override
+    public List<SnapshotEntry> snapshotEntries() {
+        long now = clock.millis();
+        List<SnapshotEntry> out = new ArrayList<>(map.size());
+        for (Map.Entry<Bytes, RedisObject> e : map.entrySet()) {
+            Long exp = expires.get(e.getKey());
+            if (!KeyspaceSupport.isExpired(exp, now)) {
+                out.add(KeyspaceSupport.toSnapshotEntry(e.getKey(), e.getValue(), exp));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    @Override
+    public void restoreSnapshot(List<SnapshotEntry> entries) {
+        Objects.requireNonNull(entries, "entries");
+        long now = clock.millis();
+        for (SnapshotEntry entry : entries) {
+            if (entry.expireAtMillis() >= 0 && entry.expireAtMillis() <= now) {
+                continue;
+            }
+            map.put(entry.key(), KeyspaceSupport.fromSnapshotValue(entry.value(), now));
+            if (entry.expireAtMillis() >= 0) {
+                expires.put(entry.key(), entry.expireAtMillis());
+            } else {
+                expires.remove(entry.key());
+            }
+        }
+    }
+
     private RedisObject liveObject(Bytes key, long now) {
         RedisObject obj = map.get(key);
         if (obj == null || KeyspaceSupport.isExpired(expires.get(key), now)) {

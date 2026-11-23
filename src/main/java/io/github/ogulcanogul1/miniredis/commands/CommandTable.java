@@ -76,7 +76,9 @@ public final class CommandTable {
                 new CommandSpec("zscore", 3, Set.of(Flag.READONLY), ZSetCommands::zscore),
                 new CommandSpec("zrange", -4, Set.of(Flag.READONLY), ZSetCommands::zrange),
                 new CommandSpec("zrangebyscore", -4, Set.of(Flag.READONLY), ZSetCommands::zrangeByScore),
-                new CommandSpec("zrank", 3, Set.of(Flag.READONLY), ZSetCommands::zrank)));
+                new CommandSpec("zrank", 3, Set.of(Flag.READONLY), ZSetCommands::zrank),
+                new CommandSpec("save", 1, Set.of(), PersistenceCommands::save),
+                new CommandSpec("bgsave", 1, Set.of(), PersistenceCommands::bgsave)));
     }
 
     /** Returns {@code true} if {@code argv} invokes the {@code QUIT} command (case-insensitive). */

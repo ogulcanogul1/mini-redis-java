@@ -924,6 +924,49 @@ final class ShardedKeyspace implements Keyspace {
         }
     }
 
+    @Override
+    public List<SnapshotEntry> snapshotEntries() {
+        long now = clock.millis();
+        List<SnapshotEntry> out = new ArrayList<>();
+        for (Shard s : shards) {
+            s.readLock.lock();
+            try {
+                for (Dict.Entry<Bytes, RedisObject> e : s.dict) {
+                    Long exp = s.expires.get(e.key());
+                    if (!KeyspaceSupport.isExpired(exp, now)) {
+                        out.add(KeyspaceSupport.toSnapshotEntry(e.key(), e.value(), exp));
+                    }
+                }
+            } finally {
+                s.readLock.unlock();
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    @Override
+    public void restoreSnapshot(List<SnapshotEntry> entries) {
+        Objects.requireNonNull(entries, "entries");
+        long now = clock.millis();
+        for (SnapshotEntry entry : entries) {
+            if (entry.expireAtMillis() >= 0 && entry.expireAtMillis() <= now) {
+                continue;
+            }
+            Shard s = shardFor(entry.key());
+            s.writeLock.lock();
+            try {
+                s.dict.put(entry.key(), KeyspaceSupport.fromSnapshotValue(entry.value(), now));
+                if (entry.expireAtMillis() >= 0) {
+                    s.expires.put(entry.key(), entry.expireAtMillis());
+                } else {
+                    s.expires.remove(entry.key());
+                }
+            } finally {
+                s.writeLock.unlock();
+            }
+        }
+    }
+
     private int shardIndex(Bytes key) {
         return hasher.hash(key) & mask;
     }

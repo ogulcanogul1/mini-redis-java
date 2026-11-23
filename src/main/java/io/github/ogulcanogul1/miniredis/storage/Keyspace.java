@@ -192,4 +192,10 @@ public interface Keyspace {
      * change this keyspace.
      */
     void forEachKey(Consumer<? super Bytes> action);
+
+    /** Returns an immutable shallow-copy snapshot of all currently live entries (K5). */
+    List<SnapshotEntry> snapshotEntries();
+
+    /** Restores entries from a snapshot, skipping already-expired entries. */
+    void restoreSnapshot(List<SnapshotEntry> entries);
 }

@@ -5,6 +5,7 @@ import io.github.ogulcanogul1.miniredis.commands.CommandContext;
 import io.github.ogulcanogul1.miniredis.commands.CommandTable;
 import io.github.ogulcanogul1.miniredis.commands.Dispatcher;
 import io.github.ogulcanogul1.miniredis.commands.ServerStats;
+import io.github.ogulcanogul1.miniredis.commands.SnapshotTrigger;
 import io.github.ogulcanogul1.miniredis.net.MultiReactorServer;
 import io.github.ogulcanogul1.miniredis.net.ServerBackend;
 import io.github.ogulcanogul1.miniredis.net.SingleThreadServer;
@@ -13,6 +14,7 @@ import io.github.ogulcanogul1.miniredis.net.ThreadPoolServer;
 import io.github.ogulcanogul1.miniredis.net.VirtualThreadServer;
 import io.github.ogulcanogul1.miniredis.persistence.AofAppender;
 import io.github.ogulcanogul1.miniredis.persistence.AofLoader;
+import io.github.ogulcanogul1.miniredis.persistence.RdbStore;
 import io.github.ogulcanogul1.miniredis.storage.ActiveExpirer;
 import io.github.ogulcanogul1.miniredis.storage.Keyspace;
 import io.github.ogulcanogul1.miniredis.storage.Keyspaces;
@@ -55,7 +57,24 @@ public final class RedisServer implements AutoCloseable {
         Clock clock = Clock.system();
         Keyspace keyspace = Keyspaces.sharded(config.shards(), config.lockType(), clock);
         this.activeExpirer = new ActiveExpirer(keyspace);
-        CommandContext ctx = new CommandContext(keyspace, stats);
+        RdbStore rdbStore = new RdbStore();
+        Path dbPath = Path.of(config.dbFilename());
+        SnapshotTrigger snapshotTrigger = new SnapshotTrigger() {
+            @Override
+            public void save() {
+                try {
+                    rdbStore.save(keyspace, dbPath);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+
+            @Override
+            public boolean bgsave() {
+                return rdbStore.bgsave(keyspace, dbPath);
+            }
+        };
+        CommandContext ctx = new CommandContext(keyspace, stats, snapshotTrigger);
         Dispatcher dispatcher;
         if (config.appendOnly()) {
             Path aofPath = Path.of(config.appendFilename());
@@ -71,6 +90,14 @@ public final class RedisServer implements AutoCloseable {
             dispatcher = new Dispatcher(table, ctx, aofAppender, config.maxMemoryBytes(), config.maxMemoryPolicy());
         } else {
             this.aofAppender = null;
+            try {
+                int loaded = rdbStore.load(keyspace, dbPath);
+                if (loaded > 0) {
+                    log.info("DB loaded from disk: {} keys", loaded);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException("failed to load snapshot at " + dbPath, e);
+            }
             dispatcher = new Dispatcher(
                     table, ctx, (spec, argv, reply) -> {}, config.maxMemoryBytes(), config.maxMemoryPolicy());
         }

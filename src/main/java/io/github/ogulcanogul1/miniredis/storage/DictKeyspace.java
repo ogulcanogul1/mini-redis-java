@@ -642,6 +642,36 @@ final class DictKeyspace implements Keyspace {
         }
     }
 
+    @Override
+    public List<SnapshotEntry> snapshotEntries() {
+        long now = clock.millis();
+        List<SnapshotEntry> out = new ArrayList<>(dict.size());
+        for (Dict.Entry<Bytes, RedisObject> e : dict) {
+            Long exp = expires.get(e.key());
+            if (!KeyspaceSupport.isExpired(exp, now)) {
+                out.add(KeyspaceSupport.toSnapshotEntry(e.key(), e.value(), exp));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    @Override
+    public void restoreSnapshot(List<SnapshotEntry> entries) {
+        Objects.requireNonNull(entries, "entries");
+        long now = clock.millis();
+        for (SnapshotEntry entry : entries) {
+            if (entry.expireAtMillis() >= 0 && entry.expireAtMillis() <= now) {
+                continue;
+            }
+            dict.put(entry.key(), KeyspaceSupport.fromSnapshotValue(entry.value(), now));
+            if (entry.expireAtMillis() >= 0) {
+                expires.put(entry.key(), entry.expireAtMillis());
+            } else {
+                expires.remove(entry.key());
+            }
+        }
+    }
+
     private RedisObject liveObject(Bytes key, long now) {
         RedisObject obj = dict.get(key);
         if (obj == null || KeyspaceSupport.isExpired(expires.get(key), now)) {
