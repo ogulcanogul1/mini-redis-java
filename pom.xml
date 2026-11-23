@@ -184,6 +184,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <excludes>
+                        <exclude>**/*StressTest.java</exclude>
+                    </excludes>
                     <systemPropertyVariables>
                         <expected.version>${project.version}</expected.version>
                     </systemPropertyVariables>
@@ -264,6 +267,20 @@
                                 <redis.ref.host>127.0.0.1</redis.ref.host>
                                 <redis.ref.port>6390</redis.ref.port>
                             </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>stress</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.self="override"/>
                         </configuration>
                     </plugin>
                 </plugins>
