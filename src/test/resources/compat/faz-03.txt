@@ -1,0 +1,76 @@
+# Differential test scenarios against real Redis 7.0.15 (REDIS_REFERANS.md).
+# Format:
+#   --- <scenario name>           : flush DB and open a fresh TCP connection
+#   SEND <frames> <escaped bytes> : send bytes and compare <frames> exact RESP replies
+#   SEND_CLOSE <frames> <bytes>   : send bytes, compare <frames> replies, assert EOF on both servers
+#   SEND_UNORDERED <escaped>      : send bytes and compare RESP array elements ignoring order
+#
+# Intentional differences (not run here; tested in unit/acceptance tests):
+#   1. Requests containing NUL (\0): Redis uses C strings in inline/error paths; we stay binary-safe.
+#   2. KEYS [\x01-\x80]: Redis compares ranges with signed char on x86; we compare unsigned bytes.
+
+--- basic_commands_and_echo_quit
+SEND 1 PING\r\n
+SEND 1 *1\r\n$4\r\nPING\r\n
+SEND 1 *2\r\n$4\r\nPING\r\n$5\r\nhello\r\n
+SEND 1 *2\r\n$4\r\nECHO\r\n$5\r\nworld\r\n
+SEND 1 *3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\na\r\nb\xFF\r\n
+SEND 1 *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+SEND 1 *2\r\n$3\r\nGET\r\n$7\r\nmissing\r\n
+SEND 1 *1\r\n$6\r\nDBSIZE\r\n
+SEND 1 *1\r\n$7\r\nFLUSHDB\r\n
+SEND 1 *1\r\n$6\r\nDBSIZE\r\n
+
+--- del_exists_keys_and_pipelining
+SEND 3 *3\r\n$3\r\nSET\r\n$3\r\nu:1\r\n$1\r\na\r\n*3\r\n$3\r\nSET\r\n$3\r\nu:2\r\n$1\r\nb\r\n*3\r\n$3\r\nSET\r\n$3\r\no:1\r\n$1\r\nc\r\n
+SEND_UNORDERED *2\r\n$4\r\nKEYS\r\n$3\r\nu:*\r\n
+SEND 1 *2\r\n$4\r\nKEYS\r\n$3\r\nu:1\r\n
+SEND 1 *4\r\n$6\r\nEXISTS\r\n$3\r\nu:1\r\n$3\r\nu:1\r\n$4\r\nnone\r\n
+SEND 1 *4\r\n$3\r\nDEL\r\n$3\r\nu:1\r\n$3\r\nu:1\r\n$3\r\no:1\r\n
+SEND 1 *1\r\n$6\r\nDBSIZE\r\n
+
+--- command_errors_and_truncation
+SEND 1 *1\r\n$3\r\nGET\r\n
+SEND 1 *1\r\n$3\r\ngEt\r\n
+SEND 1 *1\r\n$4\r\nECHO\r\n
+SEND 1 *3\r\n$4\r\nECHO\r\n$1\r\na\r\n$1\r\nb\r\n
+SEND 1 *2\r\n$7\r\nFLUSHDB\r\n$5\r\nextra\r\n
+SEND 1 *1\r\n$3\r\nfoo\r\n
+SEND 1 *3\r\n$3\r\nFOO\r\n$3\r\nbar\r\n$3\r\nbaz\r\n
+SEND 1 *2\r\n$3\r\nFOO\r\n$5\r\na\r\nbc\r\n
+SEND 1 *1\r\n$0\r\n\r\n
+SEND 1 $5\r\n
+
+--- inline_and_quotes
+SEND 1 PING\n
+SEND 1 \r\n   \t \nPING\r\n
+SEND 1 PING\rPING\r\n
+SEND 1 ECHO "a\\nb\\rc\\td\\be\\af\\q"\n
+SEND 1 ECHO "\\x41\\x4a\\xff\\x4\\xZZ"\n
+SEND 1 ECHO 'a\\nb'\n
+SEND 1 ECHO 'it\\'s'\n
+SEND 1 ECHO a"b"\n
+SEND 1 ECHO a\x0bb\r\n
+SEND 1 ECHO "a"\x0bb\r\n
+SEND 1 *0\r\n*-1\r\n*-5\r\nPING\r\n
+
+--- quit_closes_connection_and_stops_pipeline
+SEND_CLOSE 1 *1\r\n$4\r\nQUIT\r\n*1\r\n$4\r\nPING\r\n
+
+--- quit_with_extra_args_still_returns_ok
+SEND_CLOSE 1 *2\r\n$4\r\nQUIT\r\n$5\r\nextra\r\n
+
+--- protocol_error_invalid_multibulk
+SEND_CLOSE 1 *abc\r\n
+
+--- protocol_error_expected_dollar
+SEND_CLOSE 1 *1\r\nfoo\r\n
+
+--- protocol_error_negative_bulk
+SEND_CLOSE 1 *1\r\n$-1\r\n
+
+--- protocol_error_unbalanced_quotes
+SEND_CLOSE 1 "ab"c\n
+
+--- bulk_unchecked_trailing_bytes
+SEND 1 *1\r\n$4\r\nPINGxx
