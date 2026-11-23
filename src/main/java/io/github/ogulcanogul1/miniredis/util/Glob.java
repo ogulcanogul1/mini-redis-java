@@ -9,20 +9,14 @@ import java.util.Objects;
  * {@code [a-z]} (a reversed range such as {@code [z-a]} works too), {@code [^a]} (negation) and
  * {@code \} (the next byte is literal; a trailing {@code \} matches a backslash). An unclosed
  * {@code [} runs to the end of the pattern. Byte values are compared unsigned.
- * package io.github.ogulcanogul1.miniredis.util;
- *
- * import java.util.Objects;
- *
- * /**
- * Redis-style glob matching on raw bytes (binary-safe).
- *
- * <p>Supported: {@code *} (any sequence, also empty), {@code ?} (any one byte), {@code [abc]},
- * {@code [a-z]} (a reversed range such as {@code [z-a]} works too), {@code [^a]} (negation) and
- * {@code \} (the next byte is literal; a trailing {@code \} matches a backslash). An unclosed
- * {@code [} runs to the end of the pattern. Byte values are compared unsigned.
  *
  * <p>Runs in O(pattern × text) time even with many {@code *}: when a match fails, it backtracks only
  * to the most recent {@code *}, never further.
+ *
+ * <p>Known difference from Redis 7.0 on x86: Redis compares range bounds as signed {@code char}, so
+ * {@code [\x01-\x80]} there means -128..1 and matches {@code \x80}-{@code \xff} but not {@code a}.
+ * We compare unsigned on purpose: Redis's result depends on the platform (ARM's {@code char} is
+ * unsigned), and unsigned order is the order Redis itself uses everywhere else ({@code memcmp}).
  */
 public final class Glob {
 
